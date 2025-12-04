@@ -21,7 +21,10 @@ import {
   doc, 
   getDoc,
   setDoc,
-  arrayUnion
+  arrayUnion,
+  query,
+  orderBy,
+  onSnapshot
 } from 'firebase/firestore';
 
 // Updated Initial Suppliers with Addresses and Cities
@@ -82,7 +85,7 @@ interface AppContextType {
   addModule: (courseId: string, title: string) => void;
   addLesson: (courseId: string, moduleId: string, lesson: Lesson) => void;
   updateLesson: (courseId: string, moduleId: string, lessonId: string, updates: Partial<Lesson>) => void;
-  addStory: (mediaUrl: string, mediaType: 'image' | 'video') => void;
+  addStory: (mediaUrl: string, mediaType: 'image' | 'video') => Promise<void>;
   deleteOffer: (id: string) => void;
   addHeat: (offerId: string) => void;
   addComment: (offerId: string, text: string) => void;
@@ -117,7 +120,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const [suppliers, setSuppliers] = useState<Supplier[]>(() => loadFromStorage('lv_suppliers', INITIAL_SUPPLIERS_WITH_ADDRESS));
   const [vipProducts, setVipProducts] = useState<VipProduct[]>(() => loadFromStorage('lv_vip_products', INITIAL_VIP_PRODUCTS));
   const [courses, setCourses] = useState<Course[]>(() => loadFromStorage('lv_courses', INITIAL_COURSES));
-  const [stories, setStories] = useState<Story[]>(() => loadFromStorage('lv_stories', []));
+  
+  // STORIES: Changed to start empty and fill from Firebase
+  const [stories, setStories] = useState<Story[]>([]);
+  
   const [onlineCount, setOnlineCount] = useState(24);
   
   // Messages
@@ -184,9 +190,29 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   useEffect(() => { localStorage.setItem('lv_suppliers', JSON.stringify(suppliers)); }, [suppliers]);
   useEffect(() => { localStorage.setItem('lv_vip_products', JSON.stringify(vipProducts)); }, [vipProducts]);
   useEffect(() => { localStorage.setItem('lv_courses', JSON.stringify(courses)); }, [courses]);
-  useEffect(() => { localStorage.setItem('lv_stories', JSON.stringify(stories)); }, [stories]);
+  // Stories Removed from LocalStorage Persistence as they are now Cloud-based
   useEffect(() => { localStorage.setItem('lv_comm_msgs', JSON.stringify(communityMessages)); }, [communityMessages]);
   useEffect(() => { localStorage.setItem('lv_priv_msgs', JSON.stringify(privateMessages)); }, [privateMessages]);
+
+  // --- FIREBASE LISTENERS ---
+  
+  // Sync Stories from Firestore
+  useEffect(() => {
+    const storiesRef = collection(db, 'stories');
+    const q = query(storiesRef, orderBy('createdAt', 'desc'));
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+        const fetchedStories = snapshot.docs.map(doc => ({
+            id: doc.id,
+            ...doc.data()
+        })) as Story[];
+        setStories(fetchedStories);
+    }, (error) => {
+        console.error("Error fetching stories:", error);
+    });
+
+    return () => unsubscribe();
+  }, []);
 
   // --- AUTHENTICATION ---
   
@@ -453,19 +479,25 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     }));
   };
 
-  const addStory = (mediaUrl: string, mediaType: 'image' | 'video') => {
+  const addStory = async (mediaUrl: string, mediaType: 'image' | 'video') => {
     if (!currentUser) return;
-    const newStory: Story = {
-      id: Date.now().toString(),
-      userId: currentUser.id,
-      userName: currentUser.name,
-      userAvatar: currentUser.avatar || '',
-      mediaUrl,
-      mediaType,
-      timestamp: 'Agora',
-      isViewed: false
-    };
-    setStories([newStory, ...stories]);
+    
+    // Save to Firestore instead of Local State
+    try {
+        await addDoc(collection(db, 'stories'), {
+            userId: currentUser.id,
+            userName: currentUser.name,
+            userAvatar: currentUser.avatar || '',
+            mediaUrl,
+            mediaType,
+            timestamp: 'Agora', // Just a label, real sorting is done via createdAt
+            createdAt: new Date().toISOString(),
+            isViewed: false
+        });
+    } catch (error) {
+        console.error("Error adding story to Firestore", error);
+        alert("Erro ao publicar status. Tente novamente.");
+    }
   };
 
   const sendCommunityMessage = (text: string, imageUrl?: string) => {
