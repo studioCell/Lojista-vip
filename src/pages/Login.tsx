@@ -1,17 +1,18 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useApp } from '../context';
 import { useNavigate } from 'react-router-dom';
-import { Lock, Mail, ArrowRight, Eye, EyeOff, User, Phone, CheckCircle, CheckSquare, Square } from 'lucide-react';
+import { Lock, Mail, ArrowRight, Eye, EyeOff, User, Phone, CheckCircle, CheckSquare, Square, AlertTriangle } from 'lucide-react';
 
 const Login: React.FC = () => {
   const { login, register } = useApp();
   const navigate = useNavigate();
+  // Using generic ReturnType to avoid browser vs node TS conflicts
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   
-  // State for toggling modes
   const [isRegistering, setIsRegistering] = useState(false);
 
-  // Form Fields - Pre-filled with Admin Credentials
+  // Form Fields - Pre-filled with Admin Credentials for convenience
   const [name, setName] = useState('');
   const [email, setEmail] = useState('m.mateushugo123@gmail.com');
   const [whatsapp, setWhatsapp] = useState('');
@@ -23,40 +24,47 @@ const Login: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
 
-  // Load saved credentials on mount (overrides defaults if exists)
   useEffect(() => {
     const savedCreds = localStorage.getItem('lv_saved_creds');
     if (savedCreds) {
         const { email: savedEmail, password: savedPassword } = JSON.parse(savedCreds);
-        setEmail(savedEmail);
-        setPassword(savedPassword);
-        setRememberMe(true);
+        // Only override if admin is not the current default
+        if (email === 'm.mateushugo123@gmail.com') {
+             setEmail(savedEmail);
+             setPassword(savedPassword);
+             setRememberMe(true);
+        }
     }
+    return () => {
+        if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    };
   }, []);
 
   const getFriendlyErrorMessage = (errorCode: string) => {
     switch (errorCode) {
       case 'auth/configuration-not-found':
-        return 'A autenticação por E-mail/Senha não está ativada no painel do Firebase.';
+        return 'Erro de Configuração: Autenticação por E-mail/Senha não ativada no Firebase.';
       case 'auth/email-already-in-use':
-        return 'Este e-mail já está sendo usado por outra conta.';
+        return 'Este e-mail já está em uso.';
       case 'auth/invalid-email':
-        return 'O formato do e-mail é inválido.';
+        return 'E-mail inválido.';
       case 'auth/operation-not-allowed':
-        return 'O provedor de login "E-mail/Senha" não foi ativado no Console do Firebase.';
+        return 'Login por E-mail/Senha está DESATIVADO no Console do Firebase.';
       case 'auth/weak-password':
-        return 'A senha é muito fraca. Escolha uma senha mais forte.';
+        return 'Senha muito fraca (mínimo 6 caracteres).';
       case 'auth/user-disabled':
-        return 'Este usuário foi desativado.';
+        return 'Usuário desativado.';
       case 'auth/user-not-found':
-        return 'Não existe conta com este e-mail.';
+        return 'Usuário não encontrado.';
       case 'auth/wrong-password':
       case 'auth/invalid-credential':
-        return 'Senha incorreta. Tente novamente.';
+        return 'E-mail ou senha incorretos.';
       case 'auth/too-many-requests':
-        return 'Muitas tentativas falhas. Tente novamente mais tarde.';
+        return 'Muitas tentativas. Aguarde um momento.';
+      case 'auth/network-request-failed':
+        return 'Erro de conexão. Verifique sua internet.';
       default:
-        return 'Ocorreu um erro ao conectar. Tente novamente.';
+        return `Erro: ${errorCode}`;
     }
   };
 
@@ -65,66 +73,74 @@ const Login: React.FC = () => {
     setErrorMsg('');
     setIsLoading(true);
 
+    // SAFETY TIMEOUT: Force stop loading after 15s if Firebase hangs
+    if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    timeoutRef.current = setTimeout(() => {
+        setIsLoading((prev) => {
+            if (prev) {
+                setErrorMsg("A conexão demorou muito. Verifique sua internet ou a configuração do Firebase.");
+                return false;
+            }
+            return false;
+        });
+    }, 15000);
+
     try {
         if (isRegistering) {
-            // REGISTRATION LOGIC
-            if (password !== confirmPassword) {
-                setErrorMsg("As senhas não coincidem.");
-                setIsLoading(false);
-                return;
-            }
-            if (password.length < 6) {
-                setErrorMsg("A senha deve ter no mínimo 6 caracteres.");
-                setIsLoading(false);
-                return;
-            }
+            // REGISTER
+            if (password !== confirmPassword) throw new Error("As senhas não coincidem.");
+            if (password.length < 6) throw new Error("Senha mínima de 6 caracteres.");
+            
             await register(name, email, password, whatsapp);
+            if (timeoutRef.current) clearTimeout(timeoutRef.current);
             navigate('/');
         } else {
-            // LOGIN LOGIC
+            // LOGIN
             try {
-                const success = await login(email, password);
-                if (success) {
-                    if (rememberMe) {
-                        localStorage.setItem('lv_saved_creds', JSON.stringify({ email, password }));
-                    } else {
-                        localStorage.removeItem('lv_saved_creds');
-                    }
-                    navigate('/');
+                await login(email, password);
+                if (timeoutRef.current) clearTimeout(timeoutRef.current);
+                
+                if (rememberMe) {
+                    localStorage.setItem('lv_saved_creds', JSON.stringify({ email, password }));
                 } else {
-                    // Usually handled by catch, but just in case
-                     throw new Error('Falha no login.');
+                    localStorage.removeItem('lv_saved_creds');
                 }
+                navigate('/');
             } catch (loginError: any) {
-                // AUTO-CREATE ADMIN LOGIC
-                // If login fails because user not found, AND it's the specific admin email, create it.
+                // AUTO-ADMIN CREATION LOGIC
+                // If the specific admin email is not found, try to create it.
                 if ((loginError.code === 'auth/user-not-found' || loginError.code === 'auth/invalid-credential') && email === 'm.mateushugo123@gmail.com') {
-                    setErrorMsg("Conta Admin não encontrada. Criando automaticamente...");
+                    setErrorMsg("Conta Admin não existe. Criando automaticamente...");
                     try {
                         await register('Mateus Hugo (Admin)', email, password, '11999999999');
+                        if (timeoutRef.current) clearTimeout(timeoutRef.current);
                         navigate('/admin');
                         return;
                     } catch (regError: any) {
-                        console.error("Failed auto-admin creation", regError);
-                        // Fall back to showing the original login error if creation fails
-                        throw loginError;
+                        console.error("Auto-admin creation failed", regError);
+                        // If registration fails, throw the original login error to show why login failed initially
+                         throw loginError;
                     }
-                } else {
-                    throw loginError;
                 }
+                throw loginError;
             }
         }
     } catch (err: any) {
+        if (timeoutRef.current) clearTimeout(timeoutRef.current);
+        
         console.error("Auth Error:", err);
+        let msg = err.message;
+        
         let code = 'unknown';
-        if (err.message && err.message.includes('(auth/')) {
-           const match = err.message.match(/\(auth\/([^)]+)\)/);
+        if (msg && msg.includes('(auth/')) {
+           const match = msg.match(/\(auth\/([^)]+)\)/);
            if (match) code = `auth/${match[1]}`;
+           msg = getFriendlyErrorMessage(code);
         } else if (err.code) {
            code = err.code;
+           msg = getFriendlyErrorMessage(code);
         }
-        
-        setErrorMsg(getFriendlyErrorMessage(code));
+        setErrorMsg(msg);
     } finally {
         setIsLoading(false);
     }
@@ -147,8 +163,9 @@ const Login: React.FC = () => {
         </div>
 
         {errorMsg && (
-            <div className="bg-red-500/10 border border-red-500/50 text-red-400 text-sm p-3 rounded-xl mb-4 text-center">
-                {errorMsg}
+            <div className="bg-red-500/10 border border-red-500/50 text-red-200 text-sm p-4 rounded-xl mb-4 text-center flex items-center justify-center gap-2 animate-pulse">
+                <AlertTriangle size={18} className="shrink-0 text-red-500" />
+                <span>{errorMsg}</span>
             </div>
         )}
 
@@ -244,7 +261,6 @@ const Login: React.FC = () => {
             </div>
           )}
 
-          {/* Remember Me Checkbox */}
           {!isRegistering && (
               <div 
                 className="flex items-center space-x-2 cursor-pointer mt-2" 
@@ -263,10 +279,10 @@ const Login: React.FC = () => {
           <button 
             type="submit" 
             disabled={isLoading}
-            className="w-full bg-gradient-to-r from-yellow-500 to-yellow-600 text-black font-bold py-3 rounded-xl hover:opacity-90 transition transform hover:scale-[1.02] flex items-center justify-center space-x-2 mt-6"
+            className="w-full bg-gradient-to-r from-yellow-500 to-yellow-600 text-black font-bold py-3 rounded-xl hover:opacity-90 transition transform hover:scale-[1.02] flex items-center justify-center space-x-2 mt-6 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {isLoading ? 
-                <span>Processando...</span> : 
+                <span className="animate-pulse">Processando...</span> : 
                 <><span>{isRegistering ? 'Criar Conta' : 'Acessar Conta'}</span> <ArrowRight size={18}/></>
             }
           </button>

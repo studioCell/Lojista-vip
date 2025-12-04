@@ -1,7 +1,7 @@
 
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { User, Offer, Supplier, VipProduct, Course, Lesson, ChatMessage, UserRole, Story, Comment } from './types';
-import { auth, db } from './firebase'; // Import Firebase
+import { auth, db } from './firebase'; 
 import { 
   signInWithEmailAndPassword, 
   createUserWithEmailAndPassword, 
@@ -22,9 +22,6 @@ import {
   getDoc,
   arrayUnion
 } from 'firebase/firestore';
-
-// --- MOCK DATA FOR FALLBACK OR SEEDING ---
-import { INITIAL_OFFERS, INITIAL_SUPPLIERS, INITIAL_VIP_PRODUCTS, INITIAL_COURSES } from './mockData';
 
 interface AppContextType {
   user: User | null;
@@ -97,22 +94,26 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       if (firebaseUser) {
         // Fetch extra user details from 'users' collection
-        const userDocRef = doc(db, 'users', firebaseUser.uid);
-        const userDoc = await getDoc(userDocRef);
-        
-        if (userDoc.exists()) {
-           const userData = userDoc.data() as User;
-           setUser({ ...userData, id: firebaseUser.uid });
-        } else {
-           // Fallback if doc doesn't exist (shouldn't happen with register)
-           setUser({
-               id: firebaseUser.uid,
-               name: firebaseUser.displayName || 'Usuário',
-               email: firebaseUser.email || '',
-               role: UserRole.USER,
-               avatar: firebaseUser.photoURL || `https://ui-avatars.com/api/?name=${firebaseUser.email}`,
-               permissions: { suppliers: false, courses: false }
-           });
+        try {
+            const userDocRef = doc(db, 'users', firebaseUser.uid);
+            const userDoc = await getDoc(userDocRef);
+            
+            if (userDoc.exists()) {
+            const userData = userDoc.data() as User;
+            setUser({ ...userData, id: firebaseUser.uid });
+            } else {
+            // Fallback if doc doesn't exist (shouldn't happen with register)
+            setUser({
+                id: firebaseUser.uid,
+                name: firebaseUser.displayName || 'Usuário',
+                email: firebaseUser.email || '',
+                role: UserRole.USER,
+                avatar: firebaseUser.photoURL || `https://ui-avatars.com/api/?name=${firebaseUser.email}`,
+                permissions: { suppliers: false, courses: false }
+            });
+            }
+        } catch (e) {
+            console.error("Error fetching user profile:", e);
         }
       } else {
         setUser(null);
@@ -129,12 +130,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
        setAllUsers(usersList);
     });
 
-    // Offers (Ordered by timestamp desc)
-    // Note: Firestore string timestamps might not sort perfectly if not ISO, but good enough for now.
+    // Offers
     const qOffers = query(collection(db, 'offers')); 
     const unsubOffers = onSnapshot(qOffers, (snapshot) => {
        const list = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Offer));
-       // Sort client-side to handle potentially mixed timestamp formats during migration
+       // Sort client-side
        setOffers(list.sort((a,b) => (b.id > a.id ? 1 : -1))); 
     });
 
@@ -166,7 +166,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const qComm = query(collection(db, 'community_messages'), orderBy('timestamp', 'asc'));
     const unsubComm = onSnapshot(qComm, (snapshot) => {
        const list = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ChatMessage));
-       // Calculate isMine dynamically based on current logged in user
        const enrichedList = list.map(msg => ({
            ...msg,
            isMine: auth.currentUser ? msg.senderId === auth.currentUser.uid : false
@@ -175,11 +174,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     });
     
     // Private Messages
-    // In a real app, we would query 'where participants array-contains myId'
-    // For this demo, we fetch all and filter in memory for simplicity (security note: requires rules in prod)
     const unsubPriv = onSnapshot(collection(db, 'private_messages'), (snapshot) => {
         const list = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ChatMessage));
-        // We will filter these in the View/Component, but let's enrich isMine here
         const enrichedList = list.map(msg => ({
             ...msg,
             isMine: auth.currentUser ? msg.senderId === auth.currentUser.uid : false
@@ -202,41 +198,33 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   // --- ACTIONS ---
 
   const login = async (email: string, password?: string): Promise<boolean> => {
-    try {
-        await signInWithEmailAndPassword(auth, email, password || '');
-        return true;
-    } catch (error: any) {
-        console.error("Login failed", error);
-        throw error; // Re-throw to handle in UI
-    }
+    // This allows the UI to catch the error
+    await signInWithEmailAndPassword(auth, email, password || '');
+    return true; 
   };
 
   const register = async (name: string, email: string, password: string, whatsapp: string) => {
-      try {
-          const userCred = await createUserWithEmailAndPassword(auth, email, password);
-          await updateProfile(userCred.user, { displayName: name });
-          
-          const newUser: User = {
-              id: userCred.user.uid,
-              name,
-              email,
-              whatsapp,
-              role: UserRole.USER, // Default role
-              avatar: `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=FACC15&color=000`,
-              permissions: { suppliers: false, courses: false }
-          };
+      // Create Auth User
+      const userCred = await createUserWithEmailAndPassword(auth, email, password);
+      await updateProfile(userCred.user, { displayName: name });
+      
+      const newUser: User = {
+          id: userCred.user.uid,
+          name,
+          email,
+          whatsapp,
+          role: UserRole.USER, // Default role
+          avatar: `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=FACC15&color=000`,
+          permissions: { suppliers: false, courses: false }
+      };
 
-          // Admin Override check (Hardcoded for demo)
-          if (email.toLowerCase() === 'm.mateushugo123@gmail.com') {
-              newUser.role = UserRole.ADMIN;
-              newUser.permissions = { suppliers: true, courses: true };
-          }
-
-          await setDoc(doc(db, 'users', userCred.user.uid), newUser);
-          // Auto login happens by Firebase listener
-      } catch (error: any) {
-          throw new Error(error.message);
+      // Admin Override check
+      if (email.toLowerCase() === 'm.mateushugo123@gmail.com') {
+          newUser.role = UserRole.ADMIN;
+          newUser.permissions = { suppliers: true, courses: true };
       }
+
+      await setDoc(doc(db, 'users', userCred.user.uid), newUser);
   };
 
   const logout = async () => {
@@ -244,7 +232,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   };
 
   const addOffer = async (offer: Offer) => {
-      // Compress image if base64
       if (offer.mediaUrl.startsWith('data:image')) {
           offer.mediaUrl = await compressImage(offer.mediaUrl);
       }
@@ -283,7 +270,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       if (supplier.imageUrl.startsWith('data:image')) {
           supplier.imageUrl = await compressImage(supplier.imageUrl);
       }
-      // Compress gallery
       const compressedImages = await Promise.all(supplier.images.map(img => 
         img.startsWith('data:image') ? compressImage(img) : img
       ));
@@ -358,7 +344,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           userAvatar: user.avatar || '',
           mediaUrl,
           mediaType,
-          timestamp: new Date().toISOString(), // Standardize
+          timestamp: new Date().toISOString(),
           isViewed: false
       };
       await addDoc(collection(db, 'stories'), newStory);
@@ -370,7 +356,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           imageUrl = await compressImage(imageUrl);
       }
       const newMessage: ChatMessage = {
-          id: Date.now().toString(), // Firestore auto-ID is better but this works for sort
+          id: Date.now().toString(), 
           senderId: user.id,
           senderName: user.name,
           senderAvatar: user.avatar,
@@ -397,7 +383,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           imageUrl,
           timestamp: new Date().toISOString(),
           isMine: true,
-          channelId: targetUserId // IMPORTANT: In this simplified schema, channelId is the target user
+          channelId: targetUserId 
       };
       await addDoc(collection(db, 'private_messages'), newMessage);
   };
@@ -421,7 +407,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       });
   };
 
-  // Simulate Online Count (Mock)
+  // Simulate Online Count
   useEffect(() => {
     const interval = setInterval(() => {
         setOnlineCount(prev => Math.max(10, prev + (Math.floor(Math.random() * 5) - 2)));
