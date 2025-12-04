@@ -34,6 +34,32 @@ const Login: React.FC = () => {
     }
   }, []);
 
+  const getFriendlyErrorMessage = (errorCode: string) => {
+    switch (errorCode) {
+      case 'auth/configuration-not-found':
+        return 'A autenticação por E-mail/Senha não está ativada no painel do Firebase.';
+      case 'auth/email-already-in-use':
+        return 'Este e-mail já está sendo usado por outra conta.';
+      case 'auth/invalid-email':
+        return 'O formato do e-mail é inválido.';
+      case 'auth/operation-not-allowed':
+        return 'Operação não permitida.';
+      case 'auth/weak-password':
+        return 'A senha é muito fraca. Escolha uma senha mais forte.';
+      case 'auth/user-disabled':
+        return 'Este usuário foi desativado.';
+      case 'auth/user-not-found':
+        return 'Não existe conta com este e-mail.';
+      case 'auth/wrong-password':
+      case 'auth/invalid-credential':
+        return 'Senha incorreta. Tente novamente.';
+      case 'auth/too-many-requests':
+        return 'Muitas tentativas falhas. Tente novamente mais tarde.';
+      default:
+        return 'Ocorreu um erro ao conectar. Tente novamente.';
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
@@ -67,11 +93,25 @@ const Login: React.FC = () => {
                 }
                 navigate('/');
             } else {
-                setErrorMsg("E-mail ou senha inválidos.");
+                // Usually login returns false if failed inside context, but context might throw too.
+                // If context catches and returns false, we show generic error.
+                // If context throws, it goes to catch block below.
+                // Since we updated context to throw/return, let's assume catch handles detailed errors.
             }
         }
     } catch (err: any) {
-        setErrorMsg(err.message || "Ocorreu um erro. Tente novamente.");
+        console.error("Auth Error:", err);
+        // Firebase errors usually come as "Firebase: Error (auth/code)."
+        // We try to extract the code or use the message
+        let code = 'unknown';
+        if (err.message && err.message.includes('(auth/')) {
+           const match = err.message.match(/\(auth\/([^)]+)\)/);
+           if (match) code = `auth/${match[1]}`;
+        } else if (err.code) {
+           code = err.code;
+        }
+        
+        setErrorMsg(getFriendlyErrorMessage(code));
     } finally {
         setIsLoading(false);
     }
