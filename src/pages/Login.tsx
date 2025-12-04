@@ -43,7 +43,7 @@ const Login: React.FC = () => {
       case 'auth/invalid-email':
         return 'O formato do e-mail é inválido.';
       case 'auth/operation-not-allowed':
-        return 'Operação não permitida.';
+        return 'O provedor de login "E-mail/Senha" não foi ativado no Console do Firebase.';
       case 'auth/weak-password':
         return 'A senha é muito fraca. Escolha uma senha mais forte.';
       case 'auth/user-disabled':
