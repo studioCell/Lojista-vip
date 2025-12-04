@@ -32,18 +32,31 @@ const Admin: React.FC = () => {
   const [newOfferText, setNewOfferText] = useState('');
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
 
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const fileToBase64 = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.readAsDataURL(file);
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = error => reject(error);
+    });
+  };
+
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      const url = URL.createObjectURL(file);
+      if(file.size > 800 * 1024) {
+          alert("Imagem muito grande (Máx 800kb)");
+          return;
+      }
+      const url = await fileToBase64(file);
       setPreviewUrl(url);
     }
   };
   
-  const handlePostOffer = (e: React.FormEvent) => {
+  const handlePostOffer = async (e: React.FormEvent) => {
     e.preventDefault();
-    addOffer({
-      id: Date.now().toString(),
+    await addOffer({
+      id: '', // DB Generated
       supplierName: user?.name || 'Oferta do Admin',
       description: newOfferText,
       mediaUrl: previewUrl || `https://picsum.photos/600/400?random=${Date.now()}`,
@@ -52,7 +65,7 @@ const Admin: React.FC = () => {
       comments: [],
       whatsapp: '5511999999999',
       category: 'Geral',
-      timestamp: 'Agora'
+      timestamp: '' // Context handles this
     });
     setNewOfferText('');
     setPreviewUrl(null);

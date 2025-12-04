@@ -83,8 +83,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   // Auth State
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [dataLoading, setDataLoading] = useState(true);
-
+  
   // Data States (initialized empty, filled by Firestore)
   const [allUsers, setAllUsers] = useState<User[]>([]);
   const [offers, setOffers] = useState<Offer[]>([]);
@@ -107,22 +106,23 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                 
                 if (docSnap.exists()) {
                     const userData = { id: user.uid, ...docSnap.data() } as User;
-                    // FORCE ADMIN
-                    if (user.uid === 'EfskGEgsJiPW6A5gVkv5YklBLHs2') {
+                    // FORCE ADMIN (Hardcode protection)
+                    if (user.uid === 'EfskGEgsJiPW6A5gVkv5YklBLHs2' || user.email === 'm.mateushugo123@gmail.com') {
                          userData.role = UserRole.ADMIN;
                          userData.permissions = { suppliers: true, courses: true };
                     }
                     setCurrentUser(userData);
                 } else {
-                     // Fallback creation if not in DB yet
-                     const isHardcodedAdmin = user.uid === 'EfskGEgsJiPW6A5gVkv5YklBLHs2';
+                     // Create DB entry if auth exists but no doc
+                     const isHardcodedAdmin = user.email === 'm.mateushugo123@gmail.com';
                      const newUser: User = {
                         id: user.uid,
                         name: user.displayName || 'Lojista',
                         email: user.email!,
                         role: isHardcodedAdmin ? UserRole.ADMIN : UserRole.USER,
                         avatar: user.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(user.displayName || 'L')}&background=FACC15&color=000`,
-                        permissions: { suppliers: true, courses: true }
+                        permissions: { suppliers: true, courses: true },
+                        subscriptionDueDate: ''
                     };
                     await setDoc(doc(db, 'users', user.uid), newUser);
                     setCurrentUser(newUser);
@@ -151,9 +151,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   // Sync Offers
   useEffect(() => {
-      const q = query(collection(db, 'offers'), orderBy('timestamp', 'desc')); // Assuming ISO string works for order, or use createdAt
+      // Order by timestamp desc so newest offers are first
+      const q = query(collection(db, 'offers'), orderBy('createdAt', 'desc')); 
       const unsub = onSnapshot(q, (snap) => {
-          // This ensures that whenever the DB changes, the state updates automatically
           setOffers(snap.docs.map(d => ({ id: d.id, ...d.data() } as Offer)));
       });
       return () => unsub();
@@ -166,9 +166,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           const list = snap.docs.map(d => ({ id: d.id, ...d.data() } as Supplier));
           setSuppliers(list);
           
-          // SEEDING: If empty, populate with Mock Data
+          // AUTO-SEED if empty (Safe check)
           if (list.length === 0 && !isLoading) {
-             // seedSuppliers(); // Call explicitly or handle elsewhere
+             // Optional: Uncomment to auto-seed if you want the app to start populated
+             // INITIAL_SUPPLIERS.forEach(s => setDoc(doc(db, 'suppliers', s.id), s));
           }
       });
       return () => unsub();
@@ -188,7 +189,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       return () => unsub();
   }, []);
 
-  // Sync Stories
+  // Sync Stories (Critical: Real-time for everyone)
   useEffect(() => {
       const q = query(collection(db, 'stories'), orderBy('createdAt', 'desc'));
       const unsub = onSnapshot(q, (snap) => {
@@ -207,23 +208,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       });
       return () => unsub();
   }, []);
-
-  // --- 3. SEEDING FUNCTION (Auto-populate DB if empty) ---
-  useEffect(() => {
-      // Simple timeout to allow firestore to connect before deciding it's empty
-      const timer = setTimeout(() => {
-          setDataLoading(false);
-          // Only seed if absolutely empty to avoid duplicates
-          if (suppliers.length === 0 && !isLoading) {
-             // INITIAL_SUPPLIERS.forEach(s => setDoc(doc(db, 'suppliers', s.id), s));
-          }
-          if (offers.length === 0 && !isLoading) {
-             // INITIAL_OFFERS.forEach(o => setDoc(doc(db, 'offers', o.id), o));
-          }
-      }, 3000);
-      
-      return () => clearTimeout(timer);
-  }, []); 
 
   // Simulate Online Count
   useEffect(() => {
@@ -251,7 +235,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     setIsLoading(true);
     const provider = new GoogleAuthProvider();
     await signInWithPopup(auth, provider);
-    // User creation handled in onAuthStateChanged
   };
 
   const register = async (name: string, email: string, password: string, whatsapp: string) => {
@@ -260,7 +243,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         const userCred = await createUserWithEmailAndPassword(auth, email, password);
         await updateProfile(userCred.user, { displayName: name });
         
-        const isHardcodedAdmin = userCred.user.uid === 'EfskGEgsJiPW6A5gVkv5YklBLHs2';
+        const isHardcodedAdmin = email.toLowerCase() === 'm.mateushugo123@gmail.com';
         const newUser: User = {
             id: userCred.user.uid,
             name,
@@ -268,13 +251,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             whatsapp,
             role: isHardcodedAdmin ? UserRole.ADMIN : UserRole.USER,
             avatar: `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=FACC15&color=000`,
-            permissions: { suppliers: isHardcodedAdmin, courses: isHardcodedAdmin }
+            permissions: { suppliers: true, courses: true },
+            subscriptionDueDate: ''
         };
-
-        if (email.toLowerCase() === 'm.mateushugo123@gmail.com') {
-            newUser.role = UserRole.ADMIN;
-            newUser.permissions = { suppliers: true, courses: true };
-        }
 
         await setDoc(doc(db, 'users', userCred.user.uid), newUser);
       } catch (error) {
@@ -316,9 +295,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       const cleanOffer = JSON.parse(JSON.stringify(offer));
       delete cleanOffer.id; 
       
-      // Add server timestamp for sorting
-      cleanOffer.timestamp = new Date().toISOString(); 
+      // Ensure we have a sortable timestamp
       cleanOffer.createdAt = new Date().toISOString();
+      cleanOffer.timestamp = new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}); // Visual string
 
       await addDoc(collection(db, 'offers'), cleanOffer);
   };
@@ -436,7 +415,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           mediaUrl,
           mediaType,
           timestamp: 'Agora', 
-          createdAt: new Date().toISOString(),
+          createdAt: new Date().toISOString(), // Critical for sorting
           isViewed: false
       });
   };
