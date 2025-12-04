@@ -27,7 +27,17 @@ import CourseDetail from './pages/CourseDetail';
 import ChatPage from './pages/Chat';
 
 const PrivateRoute: React.FC<{ children: React.ReactElement }> = ({ children }) => {
-  const { user } = useApp();
+  const { user, isLoading } = useApp();
+  
+  // Show loading spinner while checking auth status
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-black flex items-center justify-center">
+         <div className="w-10 h-10 border-4 border-yellow-500 border-t-transparent rounded-full animate-spin"></div>
+      </div>
+    );
+  }
+  
   return user ? children : <Navigate to="/login" />;
 };
 

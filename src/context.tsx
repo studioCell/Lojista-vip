@@ -9,7 +9,9 @@ import {
     onAuthStateChanged, 
     User as FirebaseUser,
     createUserWithEmailAndPassword,
-    updateProfile
+    updateProfile,
+    signInWithPopup,
+    GoogleAuthProvider
 } from 'firebase/auth';
 import { 
   collection, 
@@ -61,6 +63,7 @@ interface AppContextType {
   allUsers: User[];
   isLoading: boolean; // Added isLoading
   login: (email: string, password?: string) => Promise<boolean>;
+  loginWithGoogle: () => Promise<void>;
   register: (name: string, email: string, password: string, whatsapp: string) => Promise<void>;
   logout: () => void;
   offers: Offer[];
@@ -230,46 +233,80 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   // FUNÇÃO DE LOGIN REAL
   const login = async (email: string, password?: string) => {
+    setIsLoading(true); // Force loading state immediately
     try {
         // Tenta fazer o login no Firebase
         await signInWithEmailAndPassword(auth, email, password || '');
         // O onAuthStateChanged (acima) irá atualizar o estado 'currentUser'
+        // Mas o isLoading só vira false quando onAuthStateChanged terminar
         return true; 
     } catch (error) {
+        setIsLoading(false); // Reset loading on error
         console.error("Erro de Login:", error);
-        // Você pode tratar o erro aqui e exibi-lo para o usuário
-        throw new Error("Credenciais inválidas ou conta não registrada.");
+        throw error;
+    }
+  };
+
+  const loginWithGoogle = async () => {
+    setIsLoading(true);
+    try {
+        const provider = new GoogleAuthProvider();
+        const userCred = await signInWithPopup(auth, provider);
+        
+        // Check if exists in DB, if not create
+        const docRef = doc(db, 'users', userCred.user.uid);
+        const docSnap = await getDoc(docRef);
+
+        if (!docSnap.exists()) {
+             const newUser: User = {
+                id: userCred.user.uid,
+                name: userCred.user.displayName || 'Lojista',
+                email: userCred.user.email!,
+                role: UserRole.USER,
+                avatar: userCred.user.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(userCred.user.displayName || 'L')}&background=FACC15&color=000`,
+                permissions: { suppliers: false, courses: false }
+            };
+            await setDoc(doc(db, 'users', userCred.user.uid), newUser);
+        }
+    } catch (error) {
+        setIsLoading(false);
+        throw error;
     }
   };
 
   const register = async (name: string, email: string, password: string, whatsapp: string) => {
-      // Create Auth User
-      const userCred = await createUserWithEmailAndPassword(auth, email, password);
-      await updateProfile(userCred.user, { displayName: name });
-      
-      const newUser: User = {
-          id: userCred.user.uid,
-          name,
-          email,
-          whatsapp,
-          role: UserRole.USER, // Default role
-          avatar: `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=FACC15&color=000`,
-          permissions: { suppliers: false, courses: false }
-      };
+      setIsLoading(true);
+      try {
+        // Create Auth User
+        const userCred = await createUserWithEmailAndPassword(auth, email, password);
+        await updateProfile(userCred.user, { displayName: name });
+        
+        const newUser: User = {
+            id: userCred.user.uid,
+            name,
+            email,
+            whatsapp,
+            role: UserRole.USER, // Default role
+            avatar: `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=FACC15&color=000`,
+            permissions: { suppliers: false, courses: false }
+        };
 
-      // Admin Override check
-      if (email.toLowerCase() === 'm.mateushugo123@gmail.com') {
-          newUser.role = UserRole.ADMIN;
-          newUser.permissions = { suppliers: true, courses: true };
+        // Admin Override check
+        if (email.toLowerCase() === 'm.mateushugo123@gmail.com') {
+            newUser.role = UserRole.ADMIN;
+            newUser.permissions = { suppliers: true, courses: true };
+        }
+
+        await setDoc(doc(db, 'users', userCred.user.uid), newUser);
+      } catch (error) {
+          setIsLoading(false);
+          throw error;
       }
-
-      await setDoc(doc(db, 'users', userCred.user.uid), newUser);
-      // setAllUsers is legacy here, but we update it to keep admin panel working somewhat for now
-      setAllUsers([...allUsers, newUser]);
   };
 
   // FUNÇÃO DE LOGOUT REAL
   const logout = async () => {
+      setIsLoading(true);
       await signOut(auth);
       // O onAuthStateChanged (acima) irá setar o 'currentUser' para null
   };
@@ -453,7 +490,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       user: currentUser, 
       allUsers, 
       isLoading,
-      login, 
+      login,
+      loginWithGoogle, 
       register, 
       logout,
       offers, suppliers, vipProducts, courses, stories, communityMessages, privateMessages, onlineCount,
@@ -461,7 +499,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       addHeat, addComment,
       sendCommunityMessage, sendPrivateMessage, toggleUserPermission, updateUserAccess
     }}>
-      {isLoading ? (
+      {isLoading && !currentUser ? (
           <div className="min-h-screen bg-black flex items-center justify-center text-yellow-500 font-bold text-xl animate-pulse">
               Carregando Lojista VIP...
           </div>

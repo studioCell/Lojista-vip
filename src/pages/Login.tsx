@@ -85,7 +85,7 @@ const Login: React.FC = () => {
     try {
         await loginWithGoogle();
         if (timeoutRef.current) clearTimeout(timeoutRef.current);
-        // Navigation handled by useEffect
+        navigate('/');
     } catch (error: any) {
         console.error(error);
         if (timeoutRef.current) clearTimeout(timeoutRef.current);
@@ -124,7 +124,7 @@ const Login: React.FC = () => {
             await register(name, email, password, whatsapp);
             if (timeoutRef.current) clearTimeout(timeoutRef.current);
             setSuccessMsg("Conta criada! Enviamos um e-mail de verificação.");
-            // Navigation handled by useEffect
+            navigate('/');
         } else {
             // LOGIN
             try {
@@ -136,7 +136,7 @@ const Login: React.FC = () => {
                 } else {
                     localStorage.removeItem('lv_saved_creds');
                 }
-                // Navigation handled by useEffect
+                navigate('/');
             } catch (loginError: any) {
                 // AUTO-ADMIN CREATION LOGIC
                 // If the specific admin email is not found, try to create it.
@@ -145,7 +145,7 @@ const Login: React.FC = () => {
                     try {
                         await register('Mateus Hugo (Admin)', email, password, '11999999999');
                         if (timeoutRef.current) clearTimeout(timeoutRef.current);
-                        // Navigation handled by useEffect
+                        navigate('/');
                         return;
                     } catch (regError: any) {
                         console.error("Auto-admin creation failed", regError);
