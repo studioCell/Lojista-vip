@@ -153,6 +153,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   useEffect(() => {
       const q = query(collection(db, 'offers'), orderBy('timestamp', 'desc')); // Assuming ISO string works for order, or use createdAt
       const unsub = onSnapshot(q, (snap) => {
+          // This ensures that whenever the DB changes, the state updates automatically
           setOffers(snap.docs.map(d => ({ id: d.id, ...d.data() } as Offer)));
       });
       return () => unsub();
@@ -190,13 +191,15 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   // Sync Stories
   useEffect(() => {
       const q = query(collection(db, 'stories'), orderBy('createdAt', 'desc'));
-      const unsub = onSnapshot(q, (snap) => setStories(snap.docs.map(d => ({ id: d.id, ...d.data() } as Story))));
+      const unsub = onSnapshot(q, (snap) => {
+          setStories(snap.docs.map(d => ({ id: d.id, ...d.data() } as Story)));
+      });
       return () => unsub();
   }, []);
 
   // Sync Messages
   useEffect(() => {
-      const q = query(collection(db, 'messages'), orderBy('timestamp', 'asc')); // Oldest first for chat log
+      const q = query(collection(db, 'messages'), orderBy('createdAt', 'asc')); 
       const unsub = onSnapshot(q, (snap) => {
           const allMsgs = snap.docs.map(d => ({ id: d.id, ...d.data() } as ChatMessage));
           setCommunityMessages(allMsgs.filter(m => m.channelId === 'community'));
@@ -207,36 +210,20 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   // --- 3. SEEDING FUNCTION (Auto-populate DB if empty) ---
   useEffect(() => {
-      const seedDatabase = async () => {
-          // Only seed if logged in as Admin to prevent spam, or check if completely empty
-          // For this demo, we check if collections are empty regardless of user
-          
-          // Seed Suppliers
-          if (suppliers.length === 0 && !dataLoading) {
-             // We can trigger this manually, or let it happen. 
-             // To prevent infinite loops or double writes, we check snapshot size in a transaction or just simple check
-          }
-      };
-      
       // Simple timeout to allow firestore to connect before deciding it's empty
       const timer = setTimeout(() => {
           setDataLoading(false);
-          if (suppliers.length === 0) {
-             INITIAL_SUPPLIERS.forEach(s => setDoc(doc(db, 'suppliers', s.id), s));
+          // Only seed if absolutely empty to avoid duplicates
+          if (suppliers.length === 0 && !isLoading) {
+             // INITIAL_SUPPLIERS.forEach(s => setDoc(doc(db, 'suppliers', s.id), s));
           }
-          if (offers.length === 0) {
-             INITIAL_OFFERS.forEach(o => setDoc(doc(db, 'offers', o.id), o));
-          }
-          if (courses.length === 0) {
-             INITIAL_COURSES.forEach(c => setDoc(doc(db, 'courses', c.id), c));
-          }
-          if (vipProducts.length === 0) {
-             INITIAL_VIP_PRODUCTS.forEach(p => setDoc(doc(db, 'vip_products', p.id), p));
+          if (offers.length === 0 && !isLoading) {
+             // INITIAL_OFFERS.forEach(o => setDoc(doc(db, 'offers', o.id), o));
           }
       }, 3000);
       
       return () => clearTimeout(timer);
-  }, []); // Run once on mount
+  }, []); 
 
   // Simulate Online Count
   useEffect(() => {
@@ -326,15 +313,14 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   // OFFERS
   const addOffer = async (offer: Offer) => {
-      // Create a clean object without undefined values for Firestore
       const cleanOffer = JSON.parse(JSON.stringify(offer));
-      delete cleanOffer.id; // Let firestore gen ID if not provided, or use setDoc if ID provided
+      delete cleanOffer.id; 
       
-      if (offer.id) {
-          await setDoc(doc(db, 'offers', offer.id), cleanOffer);
-      } else {
-          await addDoc(collection(db, 'offers'), cleanOffer);
-      }
+      // Add server timestamp for sorting
+      cleanOffer.timestamp = new Date().toISOString(); 
+      cleanOffer.createdAt = new Date().toISOString();
+
+      await addDoc(collection(db, 'offers'), cleanOffer);
   };
 
   const deleteOffer = async (id: string) => {
@@ -355,7 +341,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           userName: currentUser.name,
           userAvatar: currentUser.avatar || '',
           text,
-          timestamp: 'Agora' // Or use ISO string
+          timestamp: 'Agora' 
       };
       await updateDoc(doc(db, 'offers', offerId), {
           comments: arrayUnion(newComment)
@@ -384,8 +370,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       await setDoc(doc(db, 'courses', course.id), clean);
   };
 
-  // Handling deep nested arrays in Firestore is tricky. 
-  // Strategy: Read the course, modify in memory, write back entire modules array.
   const addModule = async (courseId: string, title: string) => {
       const courseRef = doc(db, 'courses', courseId);
       const courseSnap = await getDoc(courseRef);
@@ -461,7 +445,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const sendCommunityMessage = async (text: string, imageUrl?: string) => {
       if (!currentUser) return;
       const newMsg: ChatMessage = {
-          id: Date.now().toString(), // Will be overwritten by firestore ID but needed for type
+          id: Date.now().toString(),
           senderId: currentUser.id,
           senderName: currentUser.name,
           senderAvatar: currentUser.avatar,
@@ -471,7 +455,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           channelId: 'community'
       };
       
-      // We don't save 'isMine' in DB, it's calculated on read
       const { isMine, id, ...msgData } = newMsg; 
       await addDoc(collection(db, 'messages'), { ...msgData, createdAt: new Date().toISOString() });
   };
@@ -493,7 +476,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       await addDoc(collection(db, 'messages'), { ...msgData, createdAt: new Date().toISOString() });
   };
 
-  // Transform messages for UI (calculate isMine)
+  // Transform messages for UI (calculate isMine dynamically)
   const uiCommunityMessages = communityMessages.map(m => ({
       ...m,
       isMine: currentUser ? m.senderId === currentUser.id : false

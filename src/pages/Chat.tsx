@@ -25,19 +25,18 @@ const Chat: React.FC = () => {
   // For Admin: Get list of users who have messaged support
   const supportUsers = React.useMemo(() => {
      const users = new Map();
+     // Combine private messages to find unique conversations
      privateMessages.forEach(msg => {
         // If msg channelId exists, it tracks the user conversation
         if (msg.channelId) {
-            // We want the name of the OTHER person, not the admin
+            // Logic: Channel ID maps to the USER ID of the non-admin participant
             const isMe = msg.senderId === user?.id;
-            const otherName = isMe ? 'Usuário' : msg.senderName; 
-            const otherAvatar = isMe ? 'https://picsum.photos/100' : msg.senderAvatar;
             
             // Just use the channelId (which is the userId) as the key
             if(!users.has(msg.channelId)) {
                 users.set(msg.channelId, {
                     id: msg.channelId,
-                    name: msg.senderName === 'Mateus Hugo (Admin)' ? 'Usuário' : msg.senderName, // Very rough fallback
+                    name: msg.senderName === 'Mateus Hugo (Admin)' ? 'Usuário' : msg.senderName, 
                     avatar: msg.senderAvatar,
                     lastMessage: msg.text
                 });
@@ -51,12 +50,6 @@ const Chat: React.FC = () => {
         }
      });
      
-     // If I am admin, I need to see users even if I haven't replied yet, 
-     // but the channelID logic covers it because channelId = userId.
-     
-     // Quick fix for Admin name showing up in list if admin sent first (unlikely in support, but possible)
-     // Ideally we fetch user details from a user list, but we are mocking.
-     // Let's rely on the mock data structure where channelId = userId.
      return Array.from(users.values());
   }, [privateMessages, user]);
 
@@ -79,6 +72,7 @@ const Chat: React.FC = () => {
   };
 
   const handleSendImage = () => {
+      // Simulation for now, but linked to real DB function
       if (activeChannel === 'community') {
           sendCommunityMessage("Olhem essa foto!", `https://picsum.photos/400/300?random=${Date.now()}`);
       } else {

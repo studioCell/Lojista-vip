@@ -41,7 +41,7 @@ const OfferCard: React.FC<{ offer: Offer }> = ({ offer }) => {
             <h3 className="font-bold text-gray-100 text-sm flex items-center gap-1">
                 {offer.supplierName} 
             </h3>
-            <p className="text-xs text-gray-500">{offer.category} • {offer.timestamp}</p>
+            <p className="text-xs text-gray-500">{offer.category} • {offer.timestamp ? new Date(offer.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : 'Agora'}</p>
           </div>
         </div>
         <button className="text-gray-500 hover:text-white">
@@ -219,11 +219,17 @@ const Feed: React.FC = () => {
   const handleStoryUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-        // We use Base64 for images in Firestore to avoid bucket complexity for user
+        // LIMIT SIZE CHECK: 800KB Limit to prevent Firestore crash (1MB doc limit)
+        if (file.size > 800 * 1024) {
+             alert("O arquivo selecionado é muito grande para o status (Máx 800KB). Tente um vídeo mais curto ou compressado.");
+             return;
+        }
+
         const url = await fileToBase64(file);
         const type = file.type.startsWith('video') ? 'video' : 'image';
-        addStory(url, type);
-        alert('Status adicionado! Pode levar alguns segundos para aparecer.');
+        
+        await addStory(url, type);
+        alert('Status adicionado! Pode levar alguns segundos para aparecer para todos.');
     }
   };
 
@@ -324,7 +330,7 @@ const Feed: React.FC = () => {
       comments: [],
       whatsapp: whatsapp || '5511999999999',
       category: category || 'Geral',
-      timestamp: new Date().toLocaleTimeString() // Temporary display
+      timestamp: new Date().toISOString()
     });
     setIsModalOpen(false);
     setProductName('');
@@ -371,11 +377,12 @@ const Feed: React.FC = () => {
                  <div className="absolute inset-0 flex items-center justify-center">
                    <Plus size={24} className="text-white bg-blue-500 rounded-full p-1"/>
                  </div>
+                 {/* ACCEPT VIDEO AND IMAGE */}
                  <input 
                     type="file" 
                     hidden 
                     ref={storyInputRef} 
-                    accept="image/*"
+                    accept="image/*,video/*"
                     onChange={handleStoryUpload}
                  />
              </div>
@@ -390,7 +397,9 @@ const Feed: React.FC = () => {
                 >
                 <div className="w-full h-full rounded-full bg-dark border-2 border-dark overflow-hidden flex items-center justify-center">
                     {story.mediaType === 'video' ? (
-                        <video src={story.mediaUrl} className="w-full h-full object-cover" muted />
+                        <div className="w-full h-full bg-black flex items-center justify-center">
+                             <Video size={20} className="text-white"/>
+                        </div>
                     ) : (
                         <img src={story.mediaUrl} className="w-full h-full object-cover" alt="Story" />
                     )}
@@ -454,7 +463,7 @@ const Feed: React.FC = () => {
         ))}
         {offers.length === 0 && (
           <div className="text-center py-20 text-gray-500">
-            Aguardando ofertas...
+            Aguardando novas ofertas do Admin...
           </div>
         )}
       </div>
@@ -479,7 +488,7 @@ const Feed: React.FC = () => {
                   <img src={currentStory.userAvatar} className="w-10 h-10 rounded-full border border-gray-500" />
                   <div>
                       <p className="text-white font-bold text-sm shadow-black drop-shadow-md">{currentStory.userName}</p>
-                      <p className="text-xs text-gray-300 shadow-black drop-shadow-md">{new Date(currentStory.timestamp).toLocaleTimeString()}</p>
+                      <p className="text-xs text-gray-300 shadow-black drop-shadow-md">{currentStory.timestamp}</p>
                   </div>
               </div>
 
@@ -498,9 +507,10 @@ const Feed: React.FC = () => {
                     {currentStory.mediaType === 'video' ? (
                         <video 
                             src={currentStory.mediaUrl} 
-                            className="w-full h-full object-cover" 
+                            className="w-full h-full object-contain" 
                             autoPlay 
                             playsInline
+                            controls={false}
                             onEnded={handleNextStory}
                         />
                     ) : (
