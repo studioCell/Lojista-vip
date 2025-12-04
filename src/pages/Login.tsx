@@ -5,7 +5,7 @@ import { useNavigate } from 'react-router-dom';
 import { Lock, Mail, ArrowRight, Eye, EyeOff, User, Phone, CheckCircle, CheckSquare, Square, AlertTriangle, Globe } from 'lucide-react';
 
 const Login: React.FC = () => {
-  const { login, register, loginWithGoogle } = useApp();
+  const { login, register, loginWithGoogle, user } = useApp();
   const navigate = useNavigate();
   // Using generic ReturnType to avoid browser vs node TS conflicts
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -24,6 +24,13 @@ const Login: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
+
+  // EFFECT: Automatically redirect when user is authenticated
+  useEffect(() => {
+    if (user) {
+        navigate('/');
+    }
+  }, [user, navigate]);
 
   useEffect(() => {
     const savedCreds = localStorage.getItem('lv_saved_creds');
@@ -78,7 +85,7 @@ const Login: React.FC = () => {
     try {
         await loginWithGoogle();
         if (timeoutRef.current) clearTimeout(timeoutRef.current);
-        navigate('/');
+        // Navigation handled by useEffect
     } catch (error: any) {
         console.error(error);
         if (timeoutRef.current) clearTimeout(timeoutRef.current);
@@ -86,7 +93,6 @@ const Login: React.FC = () => {
         let msg = error.message;
         if (error.code) msg = getFriendlyErrorMessage(error.code);
         setErrorMsg(msg);
-    } finally {
         setIsLoading(false);
     }
   };
@@ -118,7 +124,7 @@ const Login: React.FC = () => {
             await register(name, email, password, whatsapp);
             if (timeoutRef.current) clearTimeout(timeoutRef.current);
             setSuccessMsg("Conta criada! Enviamos um e-mail de verificação.");
-            setTimeout(() => navigate('/'), 2000);
+            // Navigation handled by useEffect
         } else {
             // LOGIN
             try {
@@ -130,7 +136,7 @@ const Login: React.FC = () => {
                 } else {
                     localStorage.removeItem('lv_saved_creds');
                 }
-                navigate('/');
+                // Navigation handled by useEffect
             } catch (loginError: any) {
                 // AUTO-ADMIN CREATION LOGIC
                 // If the specific admin email is not found, try to create it.
@@ -139,7 +145,7 @@ const Login: React.FC = () => {
                     try {
                         await register('Mateus Hugo (Admin)', email, password, '11999999999');
                         if (timeoutRef.current) clearTimeout(timeoutRef.current);
-                        navigate('/admin');
+                        // Navigation handled by useEffect
                         return;
                     } catch (regError: any) {
                         console.error("Auto-admin creation failed", regError);
@@ -165,7 +171,6 @@ const Login: React.FC = () => {
            msg = getFriendlyErrorMessage(code);
         }
         setErrorMsg(msg);
-    } finally {
         setIsLoading(false);
     }
   };
