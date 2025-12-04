@@ -107,11 +107,10 @@ export interface Lesson {
 
 export interface ChatMessage {
   id: string;
+  senderId: string; // Para identificar isMine
+  senderName: string; // Para mostrar no chat
+  senderAvatar?: string; 
   text: string;
-  senderId: string;
-  senderName: string;
-  senderAvatar?: string;
   imageUrl?: string;
-  channelId: string; // 'community' OR 'userId' (for support)
-  createdAt: string; // ISO String
+  timestamp: any; // Pode vir como Firestore Timestamp ou null (serverTimestamp pendente)
 }

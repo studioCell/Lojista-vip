@@ -1,32 +1,16 @@
 
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { User, Offer, Supplier, VipProduct, Course, CourseModule, Lesson, ChatMessage, UserRole, Story, Comment } from './types';
-import { INITIAL_OFFERS, INITIAL_VIP_PRODUCTS, INITIAL_COURSES, INITIAL_SUPPLIERS } from './mockData';
+import { INITIAL_OFFERS, INITIAL_VIP_PRODUCTS, INITIAL_COURSES, INITIAL_SUPPLIERS, MOCK_USERS_LIST, MOCK_ADMIN } from './mockData';
 import { auth, db } from './firebase';
-import { 
-    signInWithEmailAndPassword, 
-    signOut, 
-    onAuthStateChanged, 
-    User as FirebaseUser,
-    createUserWithEmailAndPassword,
-    updateProfile,
-    signInWithPopup,
-    GoogleAuthProvider
-} from 'firebase/auth';
 import { 
   collection, 
   addDoc, 
-  updateDoc, 
-  deleteDoc, 
-  doc, 
-  getDoc,
-  setDoc,
-  arrayUnion,
-  query,
-  orderBy,
+  query, 
+  orderBy, 
   onSnapshot,
-  increment,
-  Unsubscribe
+  serverTimestamp,
+  limit
 } from 'firebase/firestore';
 
 interface AppContextType {
@@ -34,48 +18,44 @@ interface AppContextType {
   allUsers: User[];
   isLoading: boolean;
   login: (email: string, password?: string) => Promise<boolean>;
-  loginWithGoogle: () => Promise<void>;
   register: (name: string, email: string, password: string, whatsapp: string) => Promise<void>;
   logout: () => void;
-  
   offers: Offer[];
   suppliers: Supplier[];
   vipProducts: VipProduct[];
   courses: Course[];
   stories: Story[];
   
+  // Chat States
   communityMessages: ChatMessage[];
-  privateMessages: ChatMessage[];
-  
+  supportMessages: ChatMessage[];
+  activeSupportChatId: string | null; // ID do usuário cujo chat de suporte está aberto
+  setActiveSupportChatId: (id: string | null) => void;
+
   onlineCount: number;
+  addOffer: (offer: Offer) => void;
+  addSupplier: (supplier: Supplier) => void;
+  updateSupplier: (id: string, updates: Partial<Supplier>) => void;
+  addProduct: (product: VipProduct) => void;
+  addCourse: (course: Course) => void;
+  addModule: (courseId: string, title: string) => void;
+  addLesson: (courseId: string, moduleId: string, lesson: Lesson) => void;
+  updateLesson: (courseId: string, moduleId: string, lessonId: string, updates: Partial<Lesson>) => void;
+  addStory: (mediaUrl: string, mediaType: 'image' | 'video') => void;
+  deleteOffer: (id: string) => void;
+  addHeat: (offerId: string) => void;
+  addComment: (offerId: string, text: string) => void;
+  
+  // Chat Actions
+  sendCommunityMessage: (text: string, imageUrl?: string) => void;
+  sendSupportMessage: (text: string, imageUrl?: string) => void;
 
-  addOffer: (offer: Offer) => Promise<void>;
-  deleteOffer: (id: string) => Promise<void>;
-  addHeat: (offerId: string) => Promise<void>;
-  addComment: (offerId: string, text: string) => Promise<void>;
-
-  addSupplier: (supplier: Supplier) => Promise<void>;
-  updateSupplier: (id: string, updates: Partial<Supplier>) => Promise<void>;
-  
-  addProduct: (product: VipProduct) => Promise<void>;
-  
-  addCourse: (course: Course) => Promise<void>;
-  addModule: (courseId: string, title: string) => Promise<void>;
-  addLesson: (courseId: string, moduleId: string, lesson: Lesson) => Promise<void>;
-  updateLesson: (courseId: string, moduleId: string, lessonId: string, updates: Partial<Lesson>) => Promise<void>;
-  
-  addStory: (mediaUrl: string, mediaType: 'image' | 'video') => Promise<void>;
-  
-  sendCommunityMessage: (text: string, imageUrl?: string) => Promise<void>;
-  sendPrivateMessage: (text: string, targetUserId: string, imageUrl?: string) => Promise<void>;
-  
-  toggleUserPermission: (userId: string, permission: 'suppliers' | 'courses') => Promise<void>;
-  updateUserAccess: (userId: string, dueDate: string, supplierIds: string[], courseIds: string[]) => Promise<void>;
+  toggleUserPermission: (userId: string, permission: 'suppliers' | 'courses') => void;
+  updateUserAccess: (userId: string, dueDate: string, supplierIds: string[], courseIds: string[]) => void;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
-// Helper to load from local storage (Legacy support for non-chat items)
 const loadFromStorage = (key: string, fallback: any) => {
   try {
     const saved = localStorage.getItem(key);
@@ -86,15 +66,11 @@ const loadFromStorage = (key: string, fallback: any) => {
 };
 
 export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const [user, setUser] = useState<User | null>(() => loadFromStorage('lv_session', null));
+  const [allUsers, setAllUsers] = useState<User[]>(() => loadFromStorage('lv_users', MOCK_USERS_LIST));
+  const [isLoading, setIsLoading] = useState(false);
 
-  // Data States - Users and Chat are now Realtime via Firestore
-  const [allUsers, setAllUsers] = useState<User[]>([]);
-  const [communityMessages, setCommunityMessages] = useState<ChatMessage[]>([]);
-  const [privateMessages, setPrivateMessages] = useState<ChatMessage[]>([]);
-
-  // Legacy LocalStorage States (can be migrated to Firestore later if needed)
+  // Data States
   const [offers, setOffers] = useState<Offer[]>(() => loadFromStorage('lv_offers', INITIAL_OFFERS));
   const [suppliers, setSuppliers] = useState<Supplier[]>(() => loadFromStorage('lv_suppliers', INITIAL_SUPPLIERS));
   const [vipProducts, setVipProducts] = useState<VipProduct[]>(() => loadFromStorage('lv_vip_products', INITIAL_VIP_PRODUCTS));
@@ -103,185 +79,177 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   
   const [onlineCount, setOnlineCount] = useState(24);
 
-  // --- 1. AUTHENTICATION & USER PROFILE SYNC ---
-  useEffect(() => {
-    let userUnsub: Unsubscribe | null = null;
+  // --- CHAT STATES ---
+  const [communityMessages, setCommunityMessages] = useState<ChatMessage[]>([]);
+  const [supportMessages, setSupportMessages] = useState<ChatMessage[]>([]);
+  const [activeSupportChatId, setActiveSupportChatId] = useState<string | null>(null);
 
-    const authUnsub = onAuthStateChanged(auth, async (firebaseUser: FirebaseUser | null) => {
-        if (firebaseUser) {
-            const userRef = doc(db, 'users', firebaseUser.uid);
-            // Listen to my own profile changes
-            userUnsub = onSnapshot(userRef, (docSnap) => {
-                if (docSnap.exists()) {
-                    const userData = { id: firebaseUser.uid, ...docSnap.data() } as User;
-                    // Force Admin Role logic
-                    if (firebaseUser.email === 'm.mateushugo123@gmail.com') {
-                         userData.role = UserRole.ADMIN;
-                         userData.permissions = { suppliers: true, courses: true };
-                    }
-                    setCurrentUser(userData);
-                } else {
-                     // Create profile if missing
-                     const isHardcodedAdmin = firebaseUser.email === 'm.mateushugo123@gmail.com';
-                     const newUser: User = {
-                        id: firebaseUser.uid,
-                        name: firebaseUser.displayName || 'Lojista',
-                        email: firebaseUser.email!,
-                        role: isHardcodedAdmin ? UserRole.ADMIN : UserRole.USER,
-                        avatar: firebaseUser.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(firebaseUser.displayName || 'L')}&background=FACC15&color=000`,
-                        permissions: { suppliers: isHardcodedAdmin, courses: isHardcodedAdmin },
-                        subscriptionDueDate: '',
-                        allowedSuppliers: [],
-                        allowedCourses: []
-                    };
-                    setDoc(doc(db, 'users', firebaseUser.uid), newUser);
-                    setCurrentUser(newUser);
-                }
-                setIsLoading(false);
-            });
-        } else {
-            setCurrentUser(null);
-            setIsLoading(false);
-            if (userUnsub) userUnsub();
-        }
+  // 1. LISTEN TO COMMUNITY CHAT
+  useEffect(() => {
+    const q = query(
+      collection(db, 'community_chat'),
+      orderBy('timestamp', 'asc'),
+      limit(100)
+    );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const msgs = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      })) as ChatMessage[];
+      setCommunityMessages(msgs);
     });
 
-    return () => {
-        authUnsub();
-        if (userUnsub) userUnsub();
-    };
+    return () => unsubscribe();
   }, []);
 
-  // --- 2. REAL-TIME DATA LISTENERS ---
-
-  // Sync All Users (Required for Chat List)
+  // 2. LISTEN TO SUPPORT CHAT (DYNAMIC)
   useEffect(() => {
-      const q = query(collection(db, 'users'));
-      const unsub = onSnapshot(q, (snap) => {
-          setAllUsers(snap.docs.map(d => ({ id: d.id, ...d.data() } as User)));
-      });
-      return () => unsub();
-  }, []);
+    // Se não tiver usuário logado, não faz nada
+    if (!user) return;
 
-  // Sync All Messages
-  useEffect(() => {
-      const q = query(collection(db, 'messages'), orderBy('createdAt', 'asc')); 
-      const unsub = onSnapshot(q, (snap) => {
-          const allMsgs = snap.docs.map(d => ({ id: d.id, ...d.data() } as ChatMessage));
-          
-          setCommunityMessages(allMsgs.filter(m => m.channelId === 'community'));
-          setPrivateMessages(allMsgs.filter(m => m.channelId !== 'community'));
-      });
-      return () => unsub();
-  }, []);
+    let targetUserId = null;
 
-  // Simulate Online Count
-  useEffect(() => {
-    const interval = setInterval(() => {
-        setOnlineCount(prev => Math.max(10, prev + (Math.floor(Math.random() * 5) - 2)));
-    }, 5000);
-    return () => clearInterval(interval);
-  }, []);
+    if (user.role === UserRole.USER) {
+      // Se for usuário comum, ele só vê o chat dele mesmo
+      targetUserId = user.id;
+    } else if (user.role === UserRole.ADMIN && activeSupportChatId) {
+      // Se for admin, vê o chat do usuário selecionado
+      targetUserId = activeSupportChatId;
+    }
 
-  // --- PERSISTENCE FOR LEGACY DATA ---
+    if (!targetUserId) {
+      setSupportMessages([]);
+      return;
+    }
+
+    const q = query(
+      collection(db, 'support_chats', targetUserId, 'messages'),
+      orderBy('timestamp', 'asc'),
+      limit(100)
+    );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const msgs = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      })) as ChatMessage[];
+      setSupportMessages(msgs);
+    });
+
+    return () => unsubscribe();
+  }, [user, activeSupportChatId]);
+
+  // --- PERSISTENCE ---
+  useEffect(() => { localStorage.setItem('lv_users', JSON.stringify(allUsers)); }, [allUsers]);
   useEffect(() => { localStorage.setItem('lv_offers', JSON.stringify(offers)); }, [offers]);
   useEffect(() => { localStorage.setItem('lv_suppliers', JSON.stringify(suppliers)); }, [suppliers]);
   useEffect(() => { localStorage.setItem('lv_vip_products', JSON.stringify(vipProducts)); }, [vipProducts]);
   useEffect(() => { localStorage.setItem('lv_courses', JSON.stringify(courses)); }, [courses]);
   useEffect(() => { localStorage.setItem('lv_stories', JSON.stringify(stories)); }, [stories]);
+  useEffect(() => { 
+    if (user) localStorage.setItem('lv_session', JSON.stringify(user));
+    else localStorage.removeItem('lv_session');
+  }, [user]);
 
-  // --- ACTIONS ---
-
-  const login = async (email: string, password?: string) => {
-    setIsLoading(true);
-    try {
-        await signInWithEmailAndPassword(auth, email, password || '');
-        return true; 
-    } catch (error) {
-        setIsLoading(false);
-        throw error;
+  // --- AUTH ---
+  const login = async (email: string, password?: string): Promise<boolean> => {
+    // Admin Backdoor
+    if (email === 'm.mateushugo123@gmail.com' && password === '12345678') {
+      const adminUser = allUsers.find(u => u.email === email) || MOCK_ADMIN;
+      setUser(adminUser);
+      return true;
     }
-  };
-
-  const loginWithGoogle = async () => {
-    setIsLoading(true);
-    const provider = new GoogleAuthProvider();
-    await signInWithPopup(auth, provider);
+    const foundUser = allUsers.find(u => u.email === email);
+    if (foundUser) {
+        if (foundUser.password && foundUser.password !== password) return false;
+        setUser(foundUser);
+        return true;
+    }
+    return false;
   };
 
   const register = async (name: string, email: string, password: string, whatsapp: string) => {
-      setIsLoading(true);
-      try {
-        const userCred = await createUserWithEmailAndPassword(auth, email, password);
-        await updateProfile(userCred.user, { displayName: name });
-        
-        const isHardcodedAdmin = email.toLowerCase() === 'm.mateushugo123@gmail.com';
-        const newUser: User = {
-            id: userCred.user.uid,
-            name,
-            email,
-            whatsapp,
-            role: isHardcodedAdmin ? UserRole.ADMIN : UserRole.USER,
-            avatar: `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=FACC15&color=000`,
-            permissions: { suppliers: isHardcodedAdmin, courses: isHardcodedAdmin },
-            subscriptionDueDate: '',
-            allowedSuppliers: [],
-            allowedCourses: []
-        };
-
-        await setDoc(doc(db, 'users', userCred.user.uid), newUser);
-      } catch (error) {
-          setIsLoading(false);
-          throw error;
-      }
+      if (allUsers.find(u => u.email === email)) throw new Error("E-mail já cadastrado.");
+      const newUser: User = {
+          id: Date.now().toString(),
+          name,
+          email,
+          password,
+          whatsapp,
+          role: UserRole.USER,
+          avatar: `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=FACC15&color=000`,
+          permissions: { suppliers: false, courses: false }
+      };
+      setAllUsers([...allUsers, newUser]);
+      setUser(newUser);
   };
 
-  const logout = async () => {
-      setIsLoading(true);
-      await signOut(auth);
+  const logout = () => {
+    setUser(null);
+    setActiveSupportChatId(null);
   };
+
+  // --- CHAT ACTIONS (FIRESTORE) ---
 
   const sendCommunityMessage = async (text: string, imageUrl?: string) => {
-      if (!currentUser) return;
-      const newMsg = {
-          senderId: currentUser.id,
-          senderName: currentUser.name,
-          senderAvatar: currentUser.avatar || '',
-          text,
-          imageUrl: imageUrl || null,
-          channelId: 'community',
-          createdAt: new Date().toISOString()
-      };
-      await addDoc(collection(db, 'messages'), newMsg);
+    if (!user) return;
+    try {
+      await addDoc(collection(db, 'community_chat'), {
+        senderId: user.id, // Mudado de userId para manter consistência com ChatMessage type
+        userId: user.id, // Mantendo userId para compatibilidade com prompt
+        userName: user.name,
+        senderName: user.name,
+        senderAvatar: user.avatar,
+        text,
+        imageUrl: imageUrl || null,
+        timestamp: serverTimestamp()
+      });
+    } catch (error) {
+      console.error("Error sending community message:", error);
+    }
   };
 
-  const sendPrivateMessage = async (text: string, targetUserId: string, imageUrl?: string) => {
-      if (!currentUser) return;
-      const newMsg = {
-          senderId: currentUser.id,
-          senderName: currentUser.name,
-          senderAvatar: currentUser.avatar || '',
-          text,
-          imageUrl: imageUrl || null,
-          channelId: targetUserId, // Convention: Support chat channel name is the USER's ID
-          createdAt: new Date().toISOString()
-      };
-      await addDoc(collection(db, 'messages'), newMsg);
+  const sendSupportMessage = async (text: string, imageUrl?: string) => {
+    if (!user) return;
+
+    // Define para qual chat enviar
+    // Se for User: envia para seu próprio ID
+    // Se for Admin: envia para o activeSupportChatId
+    const targetChatId = user.role === UserRole.USER ? user.id : activeSupportChatId;
+
+    if (!targetChatId) {
+      console.warn("No target chat ID selected for support message");
+      return;
+    }
+
+    try {
+      await addDoc(collection(db, 'support_chats', targetChatId, 'messages'), {
+        senderId: user.id,
+        senderName: user.name,
+        senderAvatar: user.avatar,
+        text,
+        imageUrl: imageUrl || null,
+        timestamp: serverTimestamp()
+      });
+    } catch (error) {
+      console.error("Error sending support message:", error);
+    }
   };
 
-  // Legacy Data Actions (LocalStorage)
-  const addOffer = async (offer: Offer) => setOffers([offer, ...offers]);
-  const deleteOffer = async (id: string) => setOffers(offers.filter(o => o.id !== id));
-  const addHeat = async (offerId: string) => setOffers(offers.map(o => o.id === offerId ? { ...o, likes: o.likes + 1 } : o));
-  const addComment = async (offerId: string, text: string) => {
-      if (!currentUser) return;
+  // --- OTHER ACTIONS ---
+  const addOffer = (offer: Offer) => setOffers([offer, ...offers]);
+  const deleteOffer = (id: string) => setOffers(offers.filter(o => o.id !== id));
+  const addHeat = (offerId: string) => setOffers(offers.map(o => o.id === offerId ? { ...o, likes: o.likes + 1 } : o));
+  const addComment = (offerId: string, text: string) => {
+      if (!user) return;
       setOffers(offers.map(o => {
           if (o.id === offerId) {
               const newComment: Comment = {
                   id: Date.now().toString(),
-                  userId: currentUser.id,
-                  userName: currentUser.name,
-                  userAvatar: currentUser.avatar || '',
+                  userId: user.id,
+                  userName: user.name,
+                  userAvatar: user.avatar || '',
                   text,
                   timestamp: 'Agora'
               };
@@ -290,42 +258,40 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           return o;
       }));
   };
-  const addSupplier = async (supplier: Supplier) => setSuppliers([...suppliers, supplier]);
-  const updateSupplier = async (id: string, updates: Partial<Supplier>) => setSuppliers(suppliers.map(s => s.id === id ? { ...s, ...updates } : s));
-  const addProduct = async (product: VipProduct) => setVipProducts([...vipProducts, product]);
-  const addCourse = async (course: Course) => setCourses([...courses, course]);
-  const addModule = async (courseId: string, title: string) => {
-    setCourses(courses.map(c => c.id === courseId ? { ...c, modules: [...c.modules, { id: Date.now().toString(), title, lessons: [] }] } : c));
+  const addSupplier = (supplier: Supplier) => setSuppliers([...suppliers, supplier]);
+  const updateSupplier = (id: string, updates: Partial<Supplier>) => setSuppliers(suppliers.map(s => s.id === id ? { ...s, ...updates } : s));
+  const addProduct = (product: VipProduct) => setVipProducts([...vipProducts, product]);
+  const addCourse = (course: Course) => setCourses([...courses, course]);
+  const addModule = (courseId: string, title: string) => setCourses(courses.map(c => c.id === courseId ? { ...c, modules: [...c.modules, { id: Date.now().toString(), title, lessons: [] }] } : c));
+  const addLesson = (courseId: string, moduleId: string, lesson: Lesson) => setCourses(courses.map(c => c.id === courseId ? { ...c, modules: c.modules.map(m => m.id === moduleId ? { ...m, lessons: [...m.lessons, lesson] } : m), lessonCount: c.lessonCount + 1 } : c));
+  const updateLesson = (courseId: string, moduleId: string, lessonId: string, updates: Partial<Lesson>) => setCourses(courses.map(c => c.id === courseId ? { ...c, modules: c.modules.map(m => m.id === moduleId ? { ...m, lessons: m.lessons.map(l => l.id === lessonId ? { ...l, ...updates } : l) } : m) } : c));
+  const addStory = (mediaUrl: string, mediaType: 'image' | 'video') => {
+    if (!user) return;
+    setStories([{ id: Date.now().toString(), userId: user.id, userName: user.name, userAvatar: user.avatar || '', mediaUrl, mediaType, timestamp: 'Agora', isViewed: false }, ...stories]);
   };
-  const addLesson = async (courseId: string, moduleId: string, lesson: Lesson) => {
-    setCourses(courses.map(c => c.id === courseId ? {
-        ...c, modules: c.modules.map(m => m.id === moduleId ? { ...m, lessons: [...m.lessons, lesson] } : m), lessonCount: c.lessonCount + 1
-    } : c));
+  const toggleUserPermission = (userId: string, permission: 'suppliers' | 'courses') => {
+    const updatedUsers = allUsers.map(u => u.id === userId ? { ...u, permissions: { ...u.permissions, [permission]: !u.permissions[permission] } } : u);
+    setAllUsers(updatedUsers);
   };
-  const updateLesson = async (courseId: string, moduleId: string, lessonId: string, updates: Partial<Lesson>) => {
-    setCourses(courses.map(c => c.id === courseId ? {
-        ...c, modules: c.modules.map(m => m.id === moduleId ? { ...m, lessons: m.lessons.map(l => l.id === lessonId ? { ...l, ...updates } : l) } : m)
-    } : c));
+  const updateUserAccess = (userId: string, dueDate: string, supplierIds: string[], courseIds: string[]) => {
+      const updatedUsers = allUsers.map(u => u.id === userId ? { ...u, subscriptionDueDate: dueDate, allowedSuppliers: supplierIds, allowedCourses: courseIds } : u);
+      setAllUsers(updatedUsers);
   };
-  const addStory = async (mediaUrl: string, mediaType: 'image' | 'video') => {
-    if (!currentUser) return;
-    setStories([{ id: Date.now().toString(), userId: currentUser.id, userName: currentUser.name, userAvatar: currentUser.avatar || '', mediaUrl, mediaType, timestamp: 'Agora', isViewed: false }, ...stories]);
-  };
-  const toggleUserPermission = async (userId: string, permission: 'suppliers' | 'courses') => {};
-  const updateUserAccess = async (userId: string, dueDate: string, supplierIds: string[], courseIds: string[]) => {};
 
   return (
     <AppContext.Provider value={{
-      user: currentUser, allUsers, isLoading, login, loginWithGoogle, register, logout,
-      offers, suppliers, vipProducts, courses, stories, communityMessages, privateMessages, onlineCount,
-      addOffer, deleteOffer, addHeat, addComment, addSupplier, updateSupplier, addProduct, addCourse, addModule, addLesson, updateLesson, addStory,
-      sendCommunityMessage, sendPrivateMessage, toggleUserPermission, updateUserAccess
+      user, allUsers, isLoading, login, register, logout,
+      offers, suppliers, vipProducts, courses, stories, 
+      
+      // Chat
+      communityMessages, supportMessages, activeSupportChatId, setActiveSupportChatId,
+      sendCommunityMessage, sendSupportMessage,
+
+      onlineCount,
+      addOffer, addSupplier, updateSupplier, addProduct, addCourse, addModule, addLesson, updateLesson, addStory, deleteOffer,
+      addHeat, addComment, toggleUserPermission, updateUserAccess
     }}>
-      {isLoading ? (
-          <div className="min-h-screen bg-black flex items-center justify-center text-yellow-500 font-bold text-xl animate-pulse">
-              Carregando Lojista VIP...
-          </div>
-      ) : children}
+      {children}
     </AppContext.Provider>
   );
 };
