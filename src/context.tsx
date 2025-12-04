@@ -4,6 +4,16 @@ import { User, Offer, Supplier, VipProduct, Course, CourseModule, Lesson, ChatMe
 import { INITIAL_OFFERS, INITIAL_VIP_PRODUCTS, INITIAL_COURSES, INITIAL_SUPPLIERS, MOCK_USERS_LIST, MOCK_ADMIN } from './mockData';
 import { auth, db } from './firebase';
 import { 
+    signInWithEmailAndPassword, 
+    signOut, 
+    onAuthStateChanged, 
+    User as FirebaseUser,
+    createUserWithEmailAndPassword,
+    updateProfile,
+    signInWithPopup,
+    GoogleAuthProvider
+} from 'firebase/auth';
+import { 
   collection, 
   addDoc, 
   query, 
@@ -18,6 +28,7 @@ interface AppContextType {
   allUsers: User[];
   isLoading: boolean;
   login: (email: string, password?: string) => Promise<boolean>;
+  loginWithGoogle: () => Promise<void>;
   register: (name: string, email: string, password: string, whatsapp: string) => Promise<void>;
   logout: () => void;
   offers: Offer[];
@@ -154,23 +165,64 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   // --- AUTH ---
   const login = async (email: string, password?: string): Promise<boolean> => {
+    setIsLoading(true);
     // Admin Backdoor
     if (email === 'm.mateushugo123@gmail.com' && password === '12345678') {
       const adminUser = allUsers.find(u => u.email === email) || MOCK_ADMIN;
       setUser(adminUser);
+      setIsLoading(false);
       return true;
     }
     const foundUser = allUsers.find(u => u.email === email);
     if (foundUser) {
-        if (foundUser.password && foundUser.password !== password) return false;
+        if (foundUser.password && foundUser.password !== password) {
+            setIsLoading(false);
+            return false;
+        }
         setUser(foundUser);
+        setIsLoading(false);
         return true;
     }
-    return false;
+    
+    // Attempt Firebase Auth if local fail
+    try {
+        await signInWithEmailAndPassword(auth, email, password || '');
+        // User state will be handled by auth listener if we had one for user data
+        // For now, simple fallback
+        setIsLoading(false);
+        return true;
+    } catch (e) {
+        setIsLoading(false);
+        throw e;
+    }
+  };
+
+  const loginWithGoogle = async () => {
+    setIsLoading(true);
+    const provider = new GoogleAuthProvider();
+    const res = await signInWithPopup(auth, provider);
+    const newUser: User = {
+        id: res.user.uid,
+        name: res.user.displayName || 'Usuário',
+        email: res.user.email || '',
+        role: UserRole.USER,
+        avatar: res.user.photoURL || '',
+        permissions: { suppliers: false, courses: false }
+    };
+    setUser(newUser);
+    // Add to allUsers if not exists
+    if(!allUsers.find(u => u.id === res.user.uid)) {
+        setAllUsers([...allUsers, newUser]);
+    }
+    setIsLoading(false);
   };
 
   const register = async (name: string, email: string, password: string, whatsapp: string) => {
-      if (allUsers.find(u => u.email === email)) throw new Error("E-mail já cadastrado.");
+      setIsLoading(true);
+      if (allUsers.find(u => u.email === email)) {
+          setIsLoading(false);
+          throw new Error("E-mail já cadastrado.");
+      }
       const newUser: User = {
           id: Date.now().toString(),
           name,
@@ -183,11 +235,13 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       };
       setAllUsers([...allUsers, newUser]);
       setUser(newUser);
+      setIsLoading(false);
   };
 
   const logout = () => {
     setUser(null);
     setActiveSupportChatId(null);
+    signOut(auth);
   };
 
   // --- CHAT ACTIONS (FIRESTORE) ---
@@ -280,7 +334,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   return (
     <AppContext.Provider value={{
-      user, allUsers, isLoading, login, register, logout,
+      user, allUsers, isLoading, login, loginWithGoogle, register, logout,
       offers, suppliers, vipProducts, courses, stories, 
       
       // Chat

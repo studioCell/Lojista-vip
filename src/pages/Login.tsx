@@ -332,7 +332,7 @@ const Login: React.FC = () => {
             <button 
                 type="submit" 
                 disabled={isLoading}
-                className="w-full bg-gradient-to-r from-yellow-500 to-yellow-600 text-black font-bold py-3 rounded-xl hover:opacity-90 transition transform hover:scale-[1.02] flex items-center justify-center space-x-2 mt-6 disabled:opacity-50 disabled:cursor-not-allowed"
+                className="w-full bg-white text-black font-bold py-3 rounded-xl hover:bg-gray-100 transition transform hover:scale-[1.02] flex items-center justify-center space-x-2 mt-6 disabled:opacity-50 disabled:cursor-not-allowed"
             >
                 {isLoading ? 
                     <span className="animate-pulse">Processando...</span> : 
