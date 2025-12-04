@@ -7,12 +7,11 @@ import { Lock, Mail, ArrowRight, Eye, EyeOff, User, Phone, CheckCircle, CheckSqu
 const Login: React.FC = () => {
   const { login, register, loginWithGoogle, user } = useApp();
   const navigate = useNavigate();
-  // Using generic ReturnType to avoid browser vs node TS conflicts
-  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const timeoutRef = useRef<any>(null);
   
   const [isRegistering, setIsRegistering] = useState(false);
 
-  // Form Fields - Pre-filled with Admin Credentials for convenience
+  // Form Fields
   const [name, setName] = useState('');
   const [email, setEmail] = useState('m.mateushugo123@gmail.com');
   const [whatsapp, setWhatsapp] = useState('');
@@ -25,7 +24,6 @@ const Login: React.FC = () => {
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
 
-  // EFFECT: Automatically redirect when user is authenticated
   useEffect(() => {
     if (user) {
         navigate('/');
@@ -36,7 +34,6 @@ const Login: React.FC = () => {
     const savedCreds = localStorage.getItem('lv_saved_creds');
     if (savedCreds) {
         const { email: savedEmail, password: savedPassword } = JSON.parse(savedCreds);
-        // Only override if admin is not the current default
         if (email === 'm.mateushugo123@gmail.com') {
              setEmail(savedEmail);
              setPassword(savedPassword);
@@ -48,51 +45,15 @@ const Login: React.FC = () => {
     };
   }, []);
 
-  const getFriendlyErrorMessage = (errorCode: string) => {
-    switch (errorCode) {
-      case 'auth/configuration-not-found':
-        return 'Erro de Configuração: Autenticação por E-mail/Senha não ativada no Firebase.';
-      case 'auth/email-already-in-use':
-        return 'Este e-mail já está em uso.';
-      case 'auth/invalid-email':
-        return 'E-mail inválido.';
-      case 'auth/operation-not-allowed':
-        return 'Método de login DESATIVADO no Console do Firebase.';
-      case 'auth/weak-password':
-        return 'Senha muito fraca (mínimo 6 caracteres).';
-      case 'auth/user-disabled':
-        return 'Usuário desativado.';
-      case 'auth/user-not-found':
-        return 'Usuário não encontrado.';
-      case 'auth/wrong-password':
-      case 'auth/invalid-credential':
-        return 'E-mail ou senha incorretos.';
-      case 'auth/too-many-requests':
-        return 'Muitas tentativas. Aguarde um momento.';
-      case 'auth/popup-closed-by-user':
-        return 'Login cancelado pelo usuário.';
-      case 'auth/network-request-failed':
-        return 'Erro de conexão. Verifique sua internet.';
-      default:
-        return `Erro: ${errorCode}`;
-    }
-  };
-
   const handleGoogleLogin = async () => {
     setErrorMsg('');
     setIsLoading(true);
-    
     try {
         await loginWithGoogle();
-        if (timeoutRef.current) clearTimeout(timeoutRef.current);
         navigate('/');
     } catch (error: any) {
         console.error(error);
-        if (timeoutRef.current) clearTimeout(timeoutRef.current);
-        
-        let msg = error.message;
-        if (error.code) msg = getFriendlyErrorMessage(error.code);
-        setErrorMsg(msg);
+        setErrorMsg(error.message || "Erro ao conectar com Google");
         setIsLoading(false);
     }
   };
@@ -103,12 +64,11 @@ const Login: React.FC = () => {
     setSuccessMsg('');
     setIsLoading(true);
 
-    // SAFETY TIMEOUT: Force stop loading after 15s if Firebase hangs
     if (timeoutRef.current) clearTimeout(timeoutRef.current);
     timeoutRef.current = setTimeout(() => {
         setIsLoading((prev) => {
             if (prev) {
-                setErrorMsg("Tempo esgotado. Verifique se este domínio está em 'Authorized Domains' no Firebase Console ou sua conexão.");
+                setErrorMsg("O login está demorando. Verifique sua conexão.");
                 return false;
             }
             return false;
@@ -117,60 +77,29 @@ const Login: React.FC = () => {
 
     try {
         if (isRegistering) {
-            // REGISTER
             if (password !== confirmPassword) throw new Error("As senhas não coincidem.");
             if (password.length < 6) throw new Error("Senha mínima de 6 caracteres.");
             
             await register(name, email, password, whatsapp);
-            if (timeoutRef.current) clearTimeout(timeoutRef.current);
-            setSuccessMsg("Conta criada! Enviamos um e-mail de verificação.");
+            setSuccessMsg("Conta criada! Redirecionando...");
             navigate('/');
         } else {
-            // LOGIN
-            try {
-                await login(email, password);
-                if (timeoutRef.current) clearTimeout(timeoutRef.current);
-                
+            const success = await login(email, password);
+            if (success) {
                 if (rememberMe) {
                     localStorage.setItem('lv_saved_creds', JSON.stringify({ email, password }));
                 } else {
                     localStorage.removeItem('lv_saved_creds');
                 }
                 navigate('/');
-            } catch (loginError: any) {
-                // AUTO-ADMIN CREATION LOGIC
-                // If the specific admin email is not found, try to create it.
-                if ((loginError.code === 'auth/user-not-found' || loginError.code === 'auth/invalid-credential') && email === 'm.mateushugo123@gmail.com') {
-                    setErrorMsg("Conta Admin não existe. Criando automaticamente...");
-                    try {
-                        await register('Mateus Hugo (Admin)', email, password, '11999999999');
-                        if (timeoutRef.current) clearTimeout(timeoutRef.current);
-                        navigate('/');
-                        return;
-                    } catch (regError: any) {
-                        console.error("Auto-admin creation failed", regError);
-                         throw loginError;
-                    }
-                }
-                throw loginError;
+            } else {
+                throw new Error("E-mail ou senha incorretos.");
             }
         }
     } catch (err: any) {
         if (timeoutRef.current) clearTimeout(timeoutRef.current);
-        
         console.error("Auth Error:", err);
-        let msg = err.message;
-        
-        let code = 'unknown';
-        if (msg && msg.includes('(auth/')) {
-           const match = msg.match(/\(auth\/([^)]+)\)/);
-           if (match) code = `auth/${match[1]}`;
-           msg = getFriendlyErrorMessage(code);
-        } else if (err.code) {
-           code = err.code;
-           msg = getFriendlyErrorMessage(code);
-        }
-        setErrorMsg(msg);
+        setErrorMsg(err.message || "Ocorreu um erro ao entrar.");
         setIsLoading(false);
     }
   };
@@ -206,7 +135,6 @@ const Login: React.FC = () => {
         )}
 
         <div className="space-y-4">
-             {/* Social Login */}
             <button 
                 type="button"
                 onClick={handleGoogleLogin}
@@ -280,7 +208,7 @@ const Login: React.FC = () => {
                 <div className="relative">
                 <Lock className="absolute left-4 top-3.5 text-gray-500" size={20} />
                 <input
-                    type="password"
+                    type={showPassword ? "text" : "password"}
                     placeholder="********"
                     className="w-full bg-gray-800 border border-gray-700 text-white pl-12 pr-12 py-3 rounded-xl focus:outline-none focus:border-yellow-500 transition"
                     value={password}
@@ -329,6 +257,7 @@ const Login: React.FC = () => {
                 </div>
             )}
             
+            {/* COR DO BOTAO ALTERADA PARA BRANCO */}
             <button 
                 type="submit" 
                 disabled={isLoading}

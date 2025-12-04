@@ -39,8 +39,8 @@ interface AppContextType {
   
   // Chat States
   communityMessages: ChatMessage[];
-  supportMessages: ChatMessage[];
-  activeSupportChatId: string | null; // ID do usuário cujo chat de suporte está aberto
+  supportMessages: ChatMessage[]; // Substitui privateMessages
+  activeSupportChatId: string | null;
   setActiveSupportChatId: (id: string | null) => void;
 
   onlineCount: number;
@@ -90,7 +90,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   
   const [onlineCount, setOnlineCount] = useState(24);
 
-  // --- CHAT STATES ---
+  // --- CHAT STATES (FIRESTORE) ---
   const [communityMessages, setCommunityMessages] = useState<ChatMessage[]>([]);
   const [supportMessages, setSupportMessages] = useState<ChatMessage[]>([]);
   const [activeSupportChatId, setActiveSupportChatId] = useState<string | null>(null);
@@ -116,16 +116,13 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   // 2. LISTEN TO SUPPORT CHAT (DYNAMIC)
   useEffect(() => {
-    // Se não tiver usuário logado, não faz nada
     if (!user) return;
 
     let targetUserId = null;
 
     if (user.role === UserRole.USER) {
-      // Se for usuário comum, ele só vê o chat dele mesmo
       targetUserId = user.id;
     } else if (user.role === UserRole.ADMIN && activeSupportChatId) {
-      // Se for admin, vê o chat do usuário selecionado
       targetUserId = activeSupportChatId;
     }
 
@@ -184,11 +181,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         return true;
     }
     
-    // Attempt Firebase Auth if local fail
+    // Attempt Firebase Auth
     try {
         await signInWithEmailAndPassword(auth, email, password || '');
-        // User state will be handled by auth listener if we had one for user data
-        // For now, simple fallback
         setIsLoading(false);
         return true;
     } catch (e) {
@@ -210,7 +205,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         permissions: { suppliers: false, courses: false }
     };
     setUser(newUser);
-    // Add to allUsers if not exists
     if(!allUsers.find(u => u.id === res.user.uid)) {
         setAllUsers([...allUsers, newUser]);
     }
@@ -250,9 +244,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     if (!user) return;
     try {
       await addDoc(collection(db, 'community_chat'), {
-        senderId: user.id, // Mudado de userId para manter consistência com ChatMessage type
-        userId: user.id, // Mantendo userId para compatibilidade com prompt
-        userName: user.name,
+        senderId: user.id,
         senderName: user.name,
         senderAvatar: user.avatar,
         text,
@@ -267,9 +259,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const sendSupportMessage = async (text: string, imageUrl?: string) => {
     if (!user) return;
 
-    // Define para qual chat enviar
-    // Se for User: envia para seu próprio ID
-    // Se for Admin: envia para o activeSupportChatId
     const targetChatId = user.role === UserRole.USER ? user.id : activeSupportChatId;
 
     if (!targetChatId) {
