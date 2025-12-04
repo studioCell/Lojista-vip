@@ -1,13 +1,15 @@
 
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { User, Offer, Supplier, VipProduct, Course, Lesson, ChatMessage, UserRole, Story, Comment } from './types';
-import { auth, db } from './firebase'; 
+import { User, Offer, Supplier, VipProduct, Course, CourseModule, Lesson, ChatMessage, UserRole, Story, Comment } from './types';
+import { INITIAL_OFFERS, INITIAL_VIP_PRODUCTS, INITIAL_COURSES, MOCK_ADMIN, MOCK_USERS_LIST } from './mockData';
+import { auth, db } from './firebase'; // Importa o serviço de autenticação
 import { 
-  signInWithEmailAndPassword, 
-  createUserWithEmailAndPassword, 
-  signOut, 
-  onAuthStateChanged,
-  updateProfile
+    signInWithEmailAndPassword, 
+    signOut, 
+    onAuthStateChanged, 
+    User as FirebaseUser,
+    createUserWithEmailAndPassword,
+    updateProfile
 } from 'firebase/auth';
 import { 
   collection, 
@@ -15,17 +17,49 @@ import {
   updateDoc, 
   deleteDoc, 
   doc, 
-  onSnapshot, 
-  query, 
-  orderBy, 
-  setDoc,
   getDoc,
+  setDoc,
   arrayUnion
 } from 'firebase/firestore';
+
+// Updated Initial Suppliers with Addresses and Cities
+const INITIAL_SUPPLIERS_WITH_ADDRESS: Supplier[] = [
+  {
+    id: 's1',
+    name: 'Atacado Moda Sul',
+    category: 'Moda',
+    city: 'Brás - SP',
+    imageUrl: 'https://picsum.photos/200/200?random=3',
+    rating: 4.8,
+    isVerified: true,
+    whatsapp: '5511999999999',
+    bio: 'Somos referência em moda feminina no sul do país. Enviamos para todo Brasil.',
+    address: 'Rua Miller, 500 - Brás, São Paulo - SP',
+    mapsUrl: '',
+    cnpj: '12.345.678/0001-90',
+    images: ['https://picsum.photos/400/400?random=10', 'https://picsum.photos/400/400?random=11']
+  },
+  {
+    id: 's2',
+    name: 'Jeans & Cia',
+    category: 'Moda',
+    city: 'Goiânia - GO',
+    imageUrl: 'https://picsum.photos/200/200?random=4',
+    rating: 4.5,
+    isVerified: false,
+    whatsapp: '5511977777777',
+    bio: 'Fábrica de Jeans premium. Atacado mínimo 12 peças.',
+    address: 'Galeria 44, Goiânia - GO',
+    mapsUrl: '',
+    cnpj: '98.765.432/0001-01',
+    images: ['https://picsum.photos/400/400?random=12']
+  }
+];
 
 interface AppContextType {
   user: User | null;
   allUsers: User[];
+  isLoading: boolean; // Added isLoading
   login: (email: string, password?: string) => Promise<boolean>;
   register: (name: string, email: string, password: string, whatsapp: string) => Promise<void>;
   logout: () => void;
@@ -57,150 +91,155 @@ interface AppContextType {
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
-// Helper to compress images before saving to Firestore (limit 1MB per doc)
-const compressImage = async (base64Str: string, maxWidth = 800, quality = 0.7): Promise<string> => {
-    return new Promise((resolve) => {
-        const img = new Image();
-        img.src = base64Str;
-        img.onload = () => {
-            const canvas = document.createElement('canvas');
-            const ratio = maxWidth / img.width;
-            canvas.width = maxWidth;
-            canvas.height = img.height * ratio;
-            const ctx = canvas.getContext('2d');
-            ctx?.drawImage(img, 0, 0, canvas.width, canvas.height);
-            resolve(canvas.toDataURL('image/jpeg', quality));
-        };
-        img.onerror = () => resolve(base64Str); // Fallback
-    });
+// Helper to load from local storage or fallback to initial data
+const loadFromStorage = (key: string, fallback: any) => {
+  try {
+    const saved = localStorage.getItem(key);
+    return saved ? JSON.parse(saved) : fallback;
+  } catch (error) {
+    console.warn(`Error loading ${key} from storage, resetting to default.`, error);
+    try { localStorage.removeItem(key); } catch (e) {}
+    return fallback;
+  }
 };
 
 export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const [user, setUser] = useState<User | null>(null);
-  const [allUsers, setAllUsers] = useState<User[]>([]);
-  const [offers, setOffers] = useState<Offer[]>([]);
-  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
-  const [vipProducts, setVipProducts] = useState<VipProduct[]>([]);
-  const [courses, setCourses] = useState<Course[]>([]);
-  const [stories, setStories] = useState<Story[]>([]);
-  const [communityMessages, setCommunityMessages] = useState<ChatMessage[]>([]);
-  const [privateMessages, setPrivateMessages] = useState<ChatMessage[]>([]);
+  // Auth State
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+
+  // Data States
+  const [allUsers, setAllUsers] = useState<User[]>(() => loadFromStorage('lv_users', MOCK_USERS_LIST));
+  const [offers, setOffers] = useState<Offer[]>(() => loadFromStorage('lv_offers', INITIAL_OFFERS));
+  const [suppliers, setSuppliers] = useState<Supplier[]>(() => loadFromStorage('lv_suppliers', INITIAL_SUPPLIERS_WITH_ADDRESS));
+  const [vipProducts, setVipProducts] = useState<VipProduct[]>(() => loadFromStorage('lv_vip_products', INITIAL_VIP_PRODUCTS));
+  const [courses, setCourses] = useState<Course[]>(() => loadFromStorage('lv_courses', INITIAL_COURSES));
+  const [stories, setStories] = useState<Story[]>(() => loadFromStorage('lv_stories', []));
   const [onlineCount, setOnlineCount] = useState(24);
+  
+  // Messages
+  const [communityMessages, setCommunityMessages] = useState<ChatMessage[]>(() => loadFromStorage('lv_comm_msgs', [
+    {
+      id: 'm1',
+      senderId: 'u2',
+      senderName: 'Carla Modas',
+      senderAvatar: 'https://picsum.photos/100/100?random=50',
+      text: 'Alguém já comprou com o fornecedor do Brás novo?',
+      timestamp: '10:30',
+      isMine: false,
+      channelId: 'community'
+    },
+    {
+      id: 'm2',
+      senderId: 'a1',
+      senderName: 'Mateus Hugo (Admin)',
+      senderAvatar: 'https://picsum.photos/100/100',
+      text: 'Pessoal, acabei de postar novidade na aba Fornecedores!',
+      timestamp: '10:35',
+      isMine: false,
+      channelId: 'community'
+    }
+  ]));
 
-  // --- FIREBASE LISTENERS (REAL-TIME SYNC) ---
+  const [privateMessages, setPrivateMessages] = useState<ChatMessage[]>(() => loadFromStorage('lv_priv_msgs', [
+    {
+      id: 'pm1',
+      senderId: 'u2', 
+      senderName: 'Carla Modas',
+      senderAvatar: 'https://picsum.photos/100/100?random=50',
+      text: 'Olá, gostaria de saber como funciona a área VIP.',
+      timestamp: '09:00',
+      isMine: false,
+      channelId: 'u2' 
+    },
+    {
+      id: 'pm2',
+      senderId: 'a1', 
+      senderName: 'Mateus Hugo (Admin)',
+      senderAvatar: 'https://picsum.photos/100/100',
+      text: 'Oi Carla! A área VIP libera produtos exclusivos. Posso te ajudar com o cadastro?',
+      timestamp: '09:05',
+      isMine: true,
+      channelId: 'u2'
+    }
+  ]));
 
-  // 1. Auth Listener
+  // Simulate Online Count Fluctuation
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
-      if (firebaseUser) {
-        // Fetch extra user details from 'users' collection
-        try {
-            const userDocRef = doc(db, 'users', firebaseUser.uid);
-            const userDoc = await getDoc(userDocRef);
-            
-            if (userDoc.exists()) {
-            const userData = userDoc.data() as User;
-            setUser({ ...userData, id: firebaseUser.uid });
-            } else {
-            // Fallback if doc doesn't exist (shouldn't happen with register)
-            setUser({
-                id: firebaseUser.uid,
-                name: firebaseUser.displayName || 'Usuário',
-                email: firebaseUser.email || '',
-                role: UserRole.USER,
-                avatar: firebaseUser.photoURL || `https://ui-avatars.com/api/?name=${firebaseUser.email}`,
-                permissions: { suppliers: false, courses: false }
-            });
+    const interval = setInterval(() => {
+        setOnlineCount(prev => {
+            const change = Math.floor(Math.random() * 5) - 2; // -2 to +2
+            return Math.max(10, prev + change);
+        });
+    }, 5000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // --- PERSISTENCE EFFECT ---
+  useEffect(() => { localStorage.setItem('lv_users', JSON.stringify(allUsers)); }, [allUsers]);
+  useEffect(() => { localStorage.setItem('lv_offers', JSON.stringify(offers)); }, [offers]);
+  useEffect(() => { localStorage.setItem('lv_suppliers', JSON.stringify(suppliers)); }, [suppliers]);
+  useEffect(() => { localStorage.setItem('lv_vip_products', JSON.stringify(vipProducts)); }, [vipProducts]);
+  useEffect(() => { localStorage.setItem('lv_courses', JSON.stringify(courses)); }, [courses]);
+  useEffect(() => { localStorage.setItem('lv_stories', JSON.stringify(stories)); }, [stories]);
+  useEffect(() => { localStorage.setItem('lv_comm_msgs', JSON.stringify(communityMessages)); }, [communityMessages]);
+  useEffect(() => { localStorage.setItem('lv_priv_msgs', JSON.stringify(privateMessages)); }, [privateMessages]);
+
+  // --- AUTHENTICATION ---
+  
+  // EFEITO PARA MONITORAR O ESTADO DE AUTENTICAÇÃO DO FIREBASE
+  useEffect(() => {
+    // Isso garante que o estado do usuário (logado ou não) seja atualizado automaticamente
+    const unsubscribe = onAuthStateChanged(auth, async (user: FirebaseUser | null) => {
+        if (user) {
+            // Check Firestore for full profile
+            try {
+                const docRef = doc(db, 'users', user.uid);
+                const docSnap = await getDoc(docRef);
+                
+                if (docSnap.exists()) {
+                    setCurrentUser({ id: user.uid, ...docSnap.data() } as User);
+                } else {
+                    // Fallback or Basic Profile
+                     setCurrentUser({
+                        id: user.uid,
+                        name: user.displayName || 'Lojista',
+                        email: user.email!,
+                        role: UserRole.USER,
+                        permissions: { suppliers: true, courses: true }
+                    });
+                }
+            } catch (error) {
+                console.error("Error fetching user profile", error);
+                // Fallback on error
+                setCurrentUser({
+                    id: user.uid,
+                    name: user.displayName || 'Lojista',
+                    email: user.email!,
+                    role: UserRole.USER,
+                    permissions: { suppliers: true, courses: true }
+                });
             }
-        } catch (e) {
-            console.error("Error fetching user profile:", e);
+        } else {
+            setCurrentUser(null);
         }
-      } else {
-        setUser(null);
-      }
+        setIsLoading(false);
     });
-    return () => unsubscribe();
+    return unsubscribe; // Limpa o listener ao desmontar
   }, []);
 
-  // 2. Data Listeners
-  useEffect(() => {
-    // Users
-    const unsubUsers = onSnapshot(collection(db, 'users'), (snapshot) => {
-       const usersList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as User));
-       setAllUsers(usersList);
-    });
-
-    // Offers
-    const qOffers = query(collection(db, 'offers')); 
-    const unsubOffers = onSnapshot(qOffers, (snapshot) => {
-       const list = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Offer));
-       // Sort client-side
-       setOffers(list.sort((a,b) => (b.id > a.id ? 1 : -1))); 
-    });
-
-    // Suppliers
-    const unsubSuppliers = onSnapshot(collection(db, 'suppliers'), (snapshot) => {
-       const list = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Supplier));
-       setSuppliers(list);
-    });
-
-    // Products
-    const unsubProducts = onSnapshot(collection(db, 'vip_products'), (snapshot) => {
-       const list = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as VipProduct));
-       setVipProducts(list);
-    });
-
-    // Courses
-    const unsubCourses = onSnapshot(collection(db, 'courses'), (snapshot) => {
-       const list = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Course));
-       setCourses(list);
-    });
-
-    // Stories
-    const unsubStories = onSnapshot(collection(db, 'stories'), (snapshot) => {
-       const list = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Story));
-       setStories(list.sort((a,b) => b.timestamp.localeCompare(a.timestamp)));
-    });
-
-    // Community Messages
-    const qComm = query(collection(db, 'community_messages'), orderBy('timestamp', 'asc'));
-    const unsubComm = onSnapshot(qComm, (snapshot) => {
-       const list = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ChatMessage));
-       const enrichedList = list.map(msg => ({
-           ...msg,
-           isMine: auth.currentUser ? msg.senderId === auth.currentUser.uid : false
-       }));
-       setCommunityMessages(enrichedList);
-    });
-    
-    // Private Messages
-    const unsubPriv = onSnapshot(collection(db, 'private_messages'), (snapshot) => {
-        const list = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ChatMessage));
-        const enrichedList = list.map(msg => ({
-            ...msg,
-            isMine: auth.currentUser ? msg.senderId === auth.currentUser.uid : false
-        }));
-        setPrivateMessages(enrichedList);
-    });
-
-    return () => {
-        unsubUsers();
-        unsubOffers();
-        unsubSuppliers();
-        unsubProducts();
-        unsubCourses();
-        unsubStories();
-        unsubComm();
-        unsubPriv();
-    };
-  }, []);
-
-  // --- ACTIONS ---
-
-  const login = async (email: string, password?: string): Promise<boolean> => {
-    // This allows the UI to catch the error
-    await signInWithEmailAndPassword(auth, email, password || '');
-    return true; 
+  // FUNÇÃO DE LOGIN REAL
+  const login = async (email: string, password?: string) => {
+    try {
+        // Tenta fazer o login no Firebase
+        await signInWithEmailAndPassword(auth, email, password || '');
+        // O onAuthStateChanged (acima) irá atualizar o estado 'currentUser'
+        return true; 
+    } catch (error) {
+        console.error("Erro de Login:", error);
+        // Você pode tratar o erro aqui e exibi-lo para o usuário
+        throw new Error("Credenciais inválidas ou conta não registrada.");
+    }
   };
 
   const register = async (name: string, email: string, password: string, whatsapp: string) => {
@@ -225,205 +264,208 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       }
 
       await setDoc(doc(db, 'users', userCred.user.uid), newUser);
+      // setAllUsers is legacy here, but we update it to keep admin panel working somewhat for now
+      setAllUsers([...allUsers, newUser]);
   };
 
+  // FUNÇÃO DE LOGOUT REAL
   const logout = async () => {
-    await signOut(auth);
+      await signOut(auth);
+      // O onAuthStateChanged (acima) irá setar o 'currentUser' para null
   };
 
-  const addOffer = async (offer: Offer) => {
-      if (offer.mediaUrl.startsWith('data:image')) {
-          offer.mediaUrl = await compressImage(offer.mediaUrl);
+  // --- ACTIONS ---
+
+  const toggleUserPermission = (userId: string, permission: 'suppliers' | 'courses') => {
+    const updatedUsers = allUsers.map(u => {
+      if (u.id === userId) {
+        return {
+          ...u,
+          permissions: {
+            ...u.permissions,
+            [permission]: !u.permissions[permission]
+          }
+        };
       }
-      await addDoc(collection(db, 'offers'), offer);
+      return u;
+    });
+    setAllUsers(updatedUsers);
+    if (currentUser && currentUser.id === userId) {
+        setCurrentUser(updatedUsers.find(u => u.id === userId) || null);
+    }
   };
+
+  const updateUserAccess = (userId: string, dueDate: string, supplierIds: string[], courseIds: string[]) => {
+      const updatedUsers = allUsers.map(u => {
+        if (u.id === userId) {
+            return {
+                ...u,
+                subscriptionDueDate: dueDate,
+                allowedSuppliers: supplierIds,
+                allowedCourses: courseIds
+            };
+        }
+        return u;
+      });
+      setAllUsers(updatedUsers);
+      if (currentUser && currentUser.id === userId) {
+        setCurrentUser(updatedUsers.find(u => u.id === userId) || null);
+      }
+  };
+
+  const addOffer = (offer: Offer) => setOffers([offer, ...offers]);
+  const deleteOffer = (id: string) => setOffers(offers.filter(o => o.id !== id));
   
-  const deleteOffer = async (id: string) => {
-      await deleteDoc(doc(db, 'offers', id));
-  };
-
-  const addHeat = async (offerId: string) => {
-      const offerRef = doc(db, 'offers', offerId);
-      const offer = offers.find(o => o.id === offerId);
-      if(offer) {
-          await updateDoc(offerRef, { likes: (offer.likes || 0) + 1 });
+  const addHeat = (offerId: string) => {
+    setOffers(offers.map(o => {
+      if (o.id === offerId) {
+        return { ...o, likes: o.likes + 1 };
       }
+      return o;
+    }));
   };
 
-  const addComment = async (offerId: string, text: string) => {
-      if (!user) return;
-      const offerRef = doc(db, 'offers', offerId);
-      const newComment: Comment = {
-          id: Date.now().toString(),
-          userId: user.id,
-          userName: user.name,
-          userAvatar: user.avatar || '',
-          text,
-          timestamp: new Date().toLocaleTimeString()
-      };
-      await updateDoc(offerRef, {
-          comments: arrayUnion(newComment)
-      });
+  const addComment = (offerId: string, text: string) => {
+      if (!currentUser) return;
+      setOffers(offers.map(o => {
+          if (o.id === offerId) {
+              const newComment: Comment = {
+                  id: Date.now().toString(),
+                  userId: currentUser.id,
+                  userName: currentUser.name,
+                  userAvatar: currentUser.avatar || '',
+                  text,
+                  timestamp: 'Agora'
+              };
+              return { ...o, comments: [...o.comments, newComment] };
+          }
+          return o;
+      }));
   };
 
-  const addSupplier = async (supplier: Supplier) => {
-      if (supplier.imageUrl.startsWith('data:image')) {
-          supplier.imageUrl = await compressImage(supplier.imageUrl);
+  const addSupplier = (supplier: Supplier) => setSuppliers([...suppliers, supplier]);
+  
+  const updateSupplier = (id: string, updates: Partial<Supplier>) => {
+      setSuppliers(suppliers.map(s => s.id === id ? { ...s, ...updates } : s));
+  };
+
+  const addProduct = (product: VipProduct) => setVipProducts([...vipProducts, product]);
+  
+  const addCourse = (course: Course) => setCourses([...courses, course]);
+  
+  const addModule = (courseId: string, title: string) => {
+    setCourses(courses.map(c => {
+      if (c.id === courseId) {
+        return {
+          ...c,
+          modules: [...c.modules, { id: Date.now().toString(), title, lessons: [] }]
+        };
       }
-      const compressedImages = await Promise.all(supplier.images.map(img => 
-        img.startsWith('data:image') ? compressImage(img) : img
-      ));
-      supplier.images = compressedImages;
-
-      await addDoc(collection(db, 'suppliers'), supplier);
+      return c;
+    }));
   };
 
-  const updateSupplier = async (id: string, updates: Partial<Supplier>) => {
-      await updateDoc(doc(db, 'suppliers', id), updates);
-  };
-
-  const addProduct = async (product: VipProduct) => {
-      await addDoc(collection(db, 'vip_products'), product);
-  };
-
-  const addCourse = async (course: Course) => {
-      await addDoc(collection(db, 'courses'), course);
-  };
-
-  const addModule = async (courseId: string, title: string) => {
-      const course = courses.find(c => c.id === courseId);
-      if(course) {
-         const newModule = { id: Date.now().toString(), title, lessons: [] };
-         const updatedModules = [...course.modules, newModule];
-         await updateDoc(doc(db, 'courses', courseId), { modules: updatedModules });
+  const addLesson = (courseId: string, moduleId: string, lesson: Lesson) => {
+    setCourses(courses.map(c => {
+      if (c.id === courseId) {
+        const updatedModules = c.modules.map(m => {
+          if (m.id === moduleId) {
+            return { ...m, lessons: [...m.lessons, lesson] };
+          }
+          return m;
+        });
+        return { ...c, modules: updatedModules, lessonCount: c.lessonCount + 1 };
       }
+      return c;
+    }));
   };
 
-  const addLesson = async (courseId: string, moduleId: string, lesson: Lesson) => {
-     const course = courses.find(c => c.id === courseId);
-     if(course) {
-         const updatedModules = course.modules.map(m => {
-             if(m.id === moduleId) {
-                 return { ...m, lessons: [...m.lessons, lesson] };
-             }
-             return m;
-         });
-         await updateDoc(doc(db, 'courses', courseId), { 
-             modules: updatedModules,
-             lessonCount: (course.lessonCount || 0) + 1 
-         });
-     }
-  };
-
-  const updateLesson = async (courseId: string, moduleId: string, lessonId: string, updates: Partial<Lesson>) => {
-      const course = courses.find(c => c.id === courseId);
-      if(course) {
-          const updatedModules = course.modules.map(m => {
-              if(m.id === moduleId) {
-                  const updatedLessons = m.lessons.map(l => {
-                      if(l.id === lessonId) return { ...l, ...updates };
-                      return l;
-                  });
-                  return { ...m, lessons: updatedLessons };
-              }
-              return m;
-          });
-          await updateDoc(doc(db, 'courses', courseId), { modules: updatedModules });
+  const updateLesson = (courseId: string, moduleId: string, lessonId: string, updates: Partial<Lesson>) => {
+    setCourses(courses.map(c => {
+      if (c.id === courseId) {
+        const updatedModules = c.modules.map(m => {
+          if (m.id === moduleId) {
+            const updatedLessons = m.lessons.map(l => {
+                if (l.id === lessonId) {
+                    return { ...l, ...updates };
+                }
+                return l;
+            });
+            return { ...m, lessons: updatedLessons };
+          }
+          return m;
+        });
+        return { ...c, modules: updatedModules };
       }
+      return c;
+    }));
   };
 
-  const addStory = async (mediaUrl: string, mediaType: 'image' | 'video') => {
-      if (!user) return;
-      if (mediaType === 'image' && mediaUrl.startsWith('data:image')) {
-          mediaUrl = await compressImage(mediaUrl);
-      }
-      const newStory: Story = {
-          id: Date.now().toString(),
-          userId: user.id,
-          userName: user.name,
-          userAvatar: user.avatar || '',
-          mediaUrl,
-          mediaType,
-          timestamp: new Date().toISOString(),
-          isViewed: false
-      };
-      await addDoc(collection(db, 'stories'), newStory);
+  const addStory = (mediaUrl: string, mediaType: 'image' | 'video') => {
+    if (!currentUser) return;
+    const newStory: Story = {
+      id: Date.now().toString(),
+      userId: currentUser.id,
+      userName: currentUser.name,
+      userAvatar: currentUser.avatar || '',
+      mediaUrl,
+      mediaType,
+      timestamp: 'Agora',
+      isViewed: false
+    };
+    setStories([newStory, ...stories]);
   };
 
-  const sendCommunityMessage = async (text: string, imageUrl?: string) => {
-      if (!user) return;
-      if (imageUrl && imageUrl.startsWith('data:image')) {
-          imageUrl = await compressImage(imageUrl);
-      }
-      const newMessage: ChatMessage = {
-          id: Date.now().toString(), 
-          senderId: user.id,
-          senderName: user.name,
-          senderAvatar: user.avatar,
-          text,
-          imageUrl,
-          timestamp: new Date().toISOString(),
-          isMine: true,
-          channelId: 'community'
-      };
-      await addDoc(collection(db, 'community_messages'), newMessage);
+  const sendCommunityMessage = (text: string, imageUrl?: string) => {
+    if (!currentUser) return;
+    const newMessage: ChatMessage = {
+      id: Date.now().toString(),
+      senderId: currentUser.id,
+      senderName: currentUser.name,
+      senderAvatar: currentUser.avatar,
+      text,
+      imageUrl,
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      isMine: true,
+      channelId: 'community'
+    };
+    setCommunityMessages([...communityMessages, newMessage]);
   };
 
-  const sendPrivateMessage = async (text: string, targetUserId: string, imageUrl?: string) => {
-      if (!user) return;
-      if (imageUrl && imageUrl.startsWith('data:image')) {
-          imageUrl = await compressImage(imageUrl);
-      }
-      const newMessage: ChatMessage = {
-          id: Date.now().toString(),
-          senderId: user.id,
-          senderName: user.name,
-          senderAvatar: user.avatar,
-          text,
-          imageUrl,
-          timestamp: new Date().toISOString(),
-          isMine: true,
-          channelId: targetUserId 
-      };
-      await addDoc(collection(db, 'private_messages'), newMessage);
+  const sendPrivateMessage = (text: string, targetUserId: string, imageUrl?: string) => {
+    if (!currentUser) return;
+    const newMessage: ChatMessage = {
+      id: Date.now().toString(),
+      senderId: currentUser.id,
+      senderName: currentUser.name,
+      senderAvatar: currentUser.avatar,
+      text,
+      imageUrl,
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      isMine: true, 
+      channelId: targetUserId 
+    };
+    setPrivateMessages([...privateMessages, newMessage]);
   };
-
-  const toggleUserPermission = async (userId: string, permission: 'suppliers' | 'courses') => {
-      const targetUser = allUsers.find(u => u.id === userId);
-      if(targetUser) {
-          const newPerms = { 
-              ...targetUser.permissions, 
-              [permission]: !targetUser.permissions[permission] 
-          };
-          await updateDoc(doc(db, 'users', userId), { permissions: newPerms });
-      }
-  };
-
-  const updateUserAccess = async (userId: string, dueDate: string, supplierIds: string[], courseIds: string[]) => {
-      await updateDoc(doc(db, 'users', userId), {
-          subscriptionDueDate: dueDate,
-          allowedSuppliers: supplierIds,
-          allowedCourses: courseIds
-      });
-  };
-
-  // Simulate Online Count
-  useEffect(() => {
-    const interval = setInterval(() => {
-        setOnlineCount(prev => Math.max(10, prev + (Math.floor(Math.random() * 5) - 2)));
-    }, 5000);
-    return () => clearInterval(interval);
-  }, []);
 
   return (
     <AppContext.Provider value={{
-      user, allUsers, login, register, logout,
+      user: currentUser, 
+      allUsers, 
+      isLoading,
+      login, 
+      register, 
+      logout,
       offers, suppliers, vipProducts, courses, stories, communityMessages, privateMessages, onlineCount,
       addOffer, addSupplier, updateSupplier, addProduct, addCourse, addModule, addLesson, updateLesson, addStory, deleteOffer,
       addHeat, addComment,
       sendCommunityMessage, sendPrivateMessage, toggleUserPermission, updateUserAccess
     }}>
-      {children}
+      {isLoading ? (
+          <div className="min-h-screen bg-black flex items-center justify-center text-yellow-500 font-bold text-xl animate-pulse">
+              Carregando Lojista VIP...
+          </div>
+      ) : children}
     </AppContext.Provider>
   );
 };
