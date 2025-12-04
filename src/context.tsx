@@ -43,7 +43,10 @@ interface AppContextType {
   vipProducts: VipProduct[];
   courses: Course[];
   stories: Story[];
-  allMessages: ChatMessage[]; // Unified message stream
+  
+  communityMessages: ChatMessage[];
+  privateMessages: ChatMessage[];
+  
   onlineCount: number;
 
   addOffer: (offer: Offer) => Promise<void>;
@@ -63,7 +66,8 @@ interface AppContextType {
   
   addStory: (mediaUrl: string, mediaType: 'image' | 'video') => Promise<void>;
   
-  sendMessage: (text: string, targetId: string, imageUrl?: string) => Promise<void>;
+  sendCommunityMessage: (text: string, imageUrl?: string) => Promise<void>;
+  sendPrivateMessage: (text: string, targetUserId: string, imageUrl?: string) => Promise<void>;
   
   toggleUserPermission: (userId: string, permission: 'suppliers' | 'courses') => Promise<void>;
   updateUserAccess: (userId: string, dueDate: string, supplierIds: string[], courseIds: string[]) => Promise<void>;
@@ -71,41 +75,53 @@ interface AppContextType {
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
+// Helper to load from local storage (Legacy support for non-chat items)
+const loadFromStorage = (key: string, fallback: any) => {
+  try {
+    const saved = localStorage.getItem(key);
+    return saved ? JSON.parse(saved) : fallback;
+  } catch (error) {
+    return fallback;
+  }
+};
+
 export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Data States
+  // Data States - Users and Chat are now Realtime via Firestore
   const [allUsers, setAllUsers] = useState<User[]>([]);
-  const [offers, setOffers] = useState<Offer[]>([]);
-  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
-  const [vipProducts, setVipProducts] = useState<VipProduct[]>([]);
-  const [courses, setCourses] = useState<Course[]>([]);
-  const [stories, setStories] = useState<Story[]>([]);
-  
-  // Real-time Chat
-  const [allMessages, setAllMessages] = useState<ChatMessage[]>([]);
+  const [communityMessages, setCommunityMessages] = useState<ChatMessage[]>([]);
+  const [privateMessages, setPrivateMessages] = useState<ChatMessage[]>([]);
+
+  // Legacy LocalStorage States (can be migrated to Firestore later if needed)
+  const [offers, setOffers] = useState<Offer[]>(() => loadFromStorage('lv_offers', INITIAL_OFFERS));
+  const [suppliers, setSuppliers] = useState<Supplier[]>(() => loadFromStorage('lv_suppliers', INITIAL_SUPPLIERS));
+  const [vipProducts, setVipProducts] = useState<VipProduct[]>(() => loadFromStorage('lv_vip_products', INITIAL_VIP_PRODUCTS));
+  const [courses, setCourses] = useState<Course[]>(() => loadFromStorage('lv_courses', INITIAL_COURSES));
+  const [stories, setStories] = useState<Story[]>(() => loadFromStorage('lv_stories', []));
   
   const [onlineCount, setOnlineCount] = useState(24);
 
-  // --- 1. AUTHENTICATION & CURRENT USER LISTENER ---
+  // --- 1. AUTHENTICATION & USER PROFILE SYNC ---
   useEffect(() => {
     let userUnsub: Unsubscribe | null = null;
 
     const authUnsub = onAuthStateChanged(auth, async (firebaseUser: FirebaseUser | null) => {
         if (firebaseUser) {
             const userRef = doc(db, 'users', firebaseUser.uid);
+            // Listen to my own profile changes
             userUnsub = onSnapshot(userRef, (docSnap) => {
                 if (docSnap.exists()) {
                     const userData = { id: firebaseUser.uid, ...docSnap.data() } as User;
-                    // Force Admin Role check
+                    // Force Admin Role logic
                     if (firebaseUser.email === 'm.mateushugo123@gmail.com') {
                          userData.role = UserRole.ADMIN;
                          userData.permissions = { suppliers: true, courses: true };
                     }
                     setCurrentUser(userData);
                 } else {
-                     // Create DB entry if it doesn't exist
+                     // Create profile if missing
                      const isHardcodedAdmin = firebaseUser.email === 'm.mateushugo123@gmail.com';
                      const newUser: User = {
                         id: firebaseUser.uid,
@@ -122,17 +138,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                     setCurrentUser(newUser);
                 }
                 setIsLoading(false);
-            }, (error) => {
-                console.error("User Snapshot Error:", error);
-                setIsLoading(false);
             });
         } else {
             setCurrentUser(null);
             setIsLoading(false);
-            if (userUnsub) {
-                userUnsub();
-                userUnsub = null;
-            }
+            if (userUnsub) userUnsub();
         }
     });
 
@@ -142,73 +152,45 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     };
   }, []);
 
-  // --- 2. DATA LISTENERS (REAL-TIME DATABASE) ---
+  // --- 2. REAL-TIME DATA LISTENERS ---
 
+  // Sync All Users (Required for Chat List)
   useEffect(() => {
       const q = query(collection(db, 'users'));
-      return onSnapshot(q, (snap) => setAllUsers(snap.docs.map(d => ({ id: d.id, ...d.data() } as User))));
-  }, []);
-
-  useEffect(() => {
-      const q = query(collection(db, 'offers'), orderBy('createdAt', 'desc')); 
-      return onSnapshot(q, (snap) => setOffers(snap.docs.map(d => ({ id: d.id, ...d.data() } as Offer))));
-  }, []);
-
-  useEffect(() => {
-      const q = query(collection(db, 'suppliers'));
       const unsub = onSnapshot(q, (snap) => {
-          const list = snap.docs.map(d => ({ id: d.id, ...d.data() } as Supplier));
-          setSuppliers(list);
-          // Initial Seed if empty
-          if (list.length === 0 && !isLoading) {
-             INITIAL_SUPPLIERS.forEach(s => setDoc(doc(db, 'suppliers', s.id), s));
-          }
+          setAllUsers(snap.docs.map(d => ({ id: d.id, ...d.data() } as User)));
       });
       return () => unsub();
-  }, [isLoading]);
-
-  useEffect(() => {
-      const q = query(collection(db, 'vip_products'));
-      const unsub = onSnapshot(q, (snap) => {
-          const list = snap.docs.map(d => ({ id: d.id, ...d.data() } as VipProduct));
-          setVipProducts(list);
-          if (list.length === 0 && !isLoading) {
-             INITIAL_VIP_PRODUCTS.forEach(p => setDoc(doc(db, 'vip_products', p.id), p));
-          }
-      });
-      return () => unsub();
-  }, [isLoading]);
-
-  useEffect(() => {
-      const q = query(collection(db, 'courses'));
-      const unsub = onSnapshot(q, (snap) => {
-          const list = snap.docs.map(d => ({ id: d.id, ...d.data() } as Course));
-          setCourses(list);
-          if (list.length === 0 && !isLoading) {
-             INITIAL_COURSES.forEach(c => setDoc(doc(db, 'courses', c.id), c));
-          }
-      });
-      return () => unsub();
-  }, [isLoading]);
-
-  useEffect(() => {
-      const q = query(collection(db, 'stories'), orderBy('createdAt', 'desc'));
-      return onSnapshot(q, (snap) => setStories(snap.docs.map(d => ({ id: d.id, ...d.data() } as Story))));
   }, []);
 
-  // --- REAL TIME MESSAGES ---
+  // Sync All Messages
   useEffect(() => {
-      // Listen to ALL messages ordered by time.
-      // Filtering happens in the UI component for performance/simplicity in this architecture.
       const q = query(collection(db, 'messages'), orderBy('createdAt', 'asc')); 
       const unsub = onSnapshot(q, (snap) => {
-          const msgs = snap.docs.map(d => ({ id: d.id, ...d.data() } as ChatMessage));
-          setAllMessages(msgs);
+          const allMsgs = snap.docs.map(d => ({ id: d.id, ...d.data() } as ChatMessage));
+          
+          setCommunityMessages(allMsgs.filter(m => m.channelId === 'community'));
+          setPrivateMessages(allMsgs.filter(m => m.channelId !== 'community'));
       });
       return () => unsub();
   }, []);
 
-  // --- 4. AUTH ACTIONS ---
+  // Simulate Online Count
+  useEffect(() => {
+    const interval = setInterval(() => {
+        setOnlineCount(prev => Math.max(10, prev + (Math.floor(Math.random() * 5) - 2)));
+    }, 5000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // --- PERSISTENCE FOR LEGACY DATA ---
+  useEffect(() => { localStorage.setItem('lv_offers', JSON.stringify(offers)); }, [offers]);
+  useEffect(() => { localStorage.setItem('lv_suppliers', JSON.stringify(suppliers)); }, [suppliers]);
+  useEffect(() => { localStorage.setItem('lv_vip_products', JSON.stringify(vipProducts)); }, [vipProducts]);
+  useEffect(() => { localStorage.setItem('lv_courses', JSON.stringify(courses)); }, [courses]);
+  useEffect(() => { localStorage.setItem('lv_stories', JSON.stringify(stories)); }, [stories]);
+
+  // --- ACTIONS ---
 
   const login = async (email: string, password?: string) => {
     setIsLoading(true);
@@ -259,189 +241,85 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       await signOut(auth);
   };
 
-  // --- 5. DATA ACTIONS (FIRESTORE) ---
-
-  const toggleUserPermission = async (userId: string, permission: 'suppliers' | 'courses') => {
-      const u = allUsers.find(user => user.id === userId);
-      if (!u) return;
-      const newPermissions = { ...u.permissions, [permission]: !u.permissions[permission] };
-      await updateDoc(doc(db, 'users', userId), { permissions: newPermissions });
-  };
-
-  const updateUserAccess = async (userId: string, dueDate: string, supplierIds: string[], courseIds: string[]) => {
-      await updateDoc(doc(db, 'users', userId), {
-          subscriptionDueDate: dueDate,
-          allowedSuppliers: supplierIds,
-          allowedCourses: courseIds
-      });
-  };
-
-  const addOffer = async (offer: Offer) => {
-      const cleanOffer = JSON.parse(JSON.stringify(offer));
-      delete cleanOffer.id; 
-      cleanOffer.createdAt = new Date().toISOString(); 
-      await addDoc(collection(db, 'offers'), cleanOffer);
-  };
-
-  const deleteOffer = async (id: string) => {
-      await deleteDoc(doc(db, 'offers', id));
-  };
-
-  const addHeat = async (offerId: string) => {
-      await updateDoc(doc(db, 'offers', offerId), { likes: increment(1) });
-  };
-
-  const addComment = async (offerId: string, text: string) => {
+  const sendCommunityMessage = async (text: string, imageUrl?: string) => {
       if (!currentUser) return;
-      const newComment: Comment = {
-          id: Date.now().toString(),
-          userId: currentUser.id,
-          userName: currentUser.name,
-          userAvatar: currentUser.avatar || '',
-          text,
-          timestamp: 'Agora' 
-      };
-      await updateDoc(doc(db, 'offers', offerId), { comments: arrayUnion(newComment) });
-  };
-
-  const addSupplier = async (supplier: Supplier) => {
-      const clean = JSON.parse(JSON.stringify(supplier));
-      await setDoc(doc(db, 'suppliers', supplier.id), clean);
-  };
-
-  const updateSupplier = async (id: string, updates: Partial<Supplier>) => {
-      await updateDoc(doc(db, 'suppliers', id), updates);
-  };
-
-  const addProduct = async (product: VipProduct) => {
-      const clean = JSON.parse(JSON.stringify(product));
-      await setDoc(doc(db, 'vip_products', product.id), clean);
-  };
-
-  const addCourse = async (course: Course) => {
-      const clean = JSON.parse(JSON.stringify(course));
-      await setDoc(doc(db, 'courses', course.id), clean);
-  };
-
-  const addModule = async (courseId: string, title: string) => {
-      const courseRef = doc(db, 'courses', courseId);
-      const courseSnap = await getDoc(courseRef);
-      if (!courseSnap.exists()) return;
-      const courseData = courseSnap.data() as Course;
-      const newModule: CourseModule = { id: Date.now().toString(), title, lessons: [] };
-      const updatedModules = [...courseData.modules, newModule];
-      await updateDoc(courseRef, { modules: updatedModules });
-  };
-
-  const addLesson = async (courseId: string, moduleId: string, lesson: Lesson) => {
-      const courseRef = doc(db, 'courses', courseId);
-      const courseSnap = await getDoc(courseRef);
-      if (!courseSnap.exists()) return;
-      const courseData = courseSnap.data() as Course;
-      const updatedModules = courseData.modules.map(m => {
-          if (m.id === moduleId) return { ...m, lessons: [...m.lessons, lesson] };
-          return m;
-      });
-      await updateDoc(courseRef, { modules: updatedModules, lessonCount: increment(1) });
-  };
-
-  const updateLesson = async (courseId: string, moduleId: string, lessonId: string, updates: Partial<Lesson>) => {
-      const courseRef = doc(db, 'courses', courseId);
-      const courseSnap = await getDoc(courseRef);
-      if (!courseSnap.exists()) return;
-      const courseData = courseSnap.data() as Course;
-      const updatedModules = courseData.modules.map(m => {
-          if (m.id === moduleId) {
-              const updatedLessons = m.lessons.map(l => {
-                  if (l.id === lessonId) return { ...l, ...updates };
-                  return l;
-              });
-              return { ...m, lessons: updatedLessons };
-          }
-          return m;
-      });
-      await updateDoc(courseRef, { modules: updatedModules });
-  };
-
-  const addStory = async (mediaUrl: string, mediaType: 'image' | 'video') => {
-      if (!currentUser) return;
-      await addDoc(collection(db, 'stories'), {
-          userId: currentUser.id,
-          userName: currentUser.name,
-          userAvatar: currentUser.avatar || '',
-          mediaUrl,
-          mediaType,
-          timestamp: 'Agora', 
-          createdAt: new Date().toISOString(),
-          isViewed: false
-      });
-  };
-
-  // Unified Send Message Function
-  const sendMessage = async (text: string, targetId: string, imageUrl?: string) => {
-      if (!currentUser) return;
-      
-      // Determine Channel ID
-      let channelId = 'community';
-      if (targetId !== 'community') {
-          // Private chat: Create a unique ID derived from both user IDs
-          // Example: userA + userB => sort => "userA_userB"
-          // This ensures both users look at the same channel
-          channelId = [currentUser.id, targetId].sort().join('_');
-      }
-
       const newMsg = {
           senderId: currentUser.id,
           senderName: currentUser.name,
           senderAvatar: currentUser.avatar || '',
           text,
           imageUrl: imageUrl || null,
-          channelId: channelId,
+          channelId: 'community',
           createdAt: new Date().toISOString()
       };
-      
       await addDoc(collection(db, 'messages'), newMsg);
   };
 
+  const sendPrivateMessage = async (text: string, targetUserId: string, imageUrl?: string) => {
+      if (!currentUser) return;
+      const newMsg = {
+          senderId: currentUser.id,
+          senderName: currentUser.name,
+          senderAvatar: currentUser.avatar || '',
+          text,
+          imageUrl: imageUrl || null,
+          channelId: targetUserId, // Convention: Support chat channel name is the USER's ID
+          createdAt: new Date().toISOString()
+      };
+      await addDoc(collection(db, 'messages'), newMsg);
+  };
+
+  // Legacy Data Actions (LocalStorage)
+  const addOffer = async (offer: Offer) => setOffers([offer, ...offers]);
+  const deleteOffer = async (id: string) => setOffers(offers.filter(o => o.id !== id));
+  const addHeat = async (offerId: string) => setOffers(offers.map(o => o.id === offerId ? { ...o, likes: o.likes + 1 } : o));
+  const addComment = async (offerId: string, text: string) => {
+      if (!currentUser) return;
+      setOffers(offers.map(o => {
+          if (o.id === offerId) {
+              const newComment: Comment = {
+                  id: Date.now().toString(),
+                  userId: currentUser.id,
+                  userName: currentUser.name,
+                  userAvatar: currentUser.avatar || '',
+                  text,
+                  timestamp: 'Agora'
+              };
+              return { ...o, comments: [...o.comments, newComment] };
+          }
+          return o;
+      }));
+  };
+  const addSupplier = async (supplier: Supplier) => setSuppliers([...suppliers, supplier]);
+  const updateSupplier = async (id: string, updates: Partial<Supplier>) => setSuppliers(suppliers.map(s => s.id === id ? { ...s, ...updates } : s));
+  const addProduct = async (product: VipProduct) => setVipProducts([...vipProducts, product]);
+  const addCourse = async (course: Course) => setCourses([...courses, course]);
+  const addModule = async (courseId: string, title: string) => {
+    setCourses(courses.map(c => c.id === courseId ? { ...c, modules: [...c.modules, { id: Date.now().toString(), title, lessons: [] }] } : c));
+  };
+  const addLesson = async (courseId: string, moduleId: string, lesson: Lesson) => {
+    setCourses(courses.map(c => c.id === courseId ? {
+        ...c, modules: c.modules.map(m => m.id === moduleId ? { ...m, lessons: [...m.lessons, lesson] } : m), lessonCount: c.lessonCount + 1
+    } : c));
+  };
+  const updateLesson = async (courseId: string, moduleId: string, lessonId: string, updates: Partial<Lesson>) => {
+    setCourses(courses.map(c => c.id === courseId ? {
+        ...c, modules: c.modules.map(m => m.id === moduleId ? { ...m, lessons: m.lessons.map(l => l.id === lessonId ? { ...l, ...updates } : l) } : m)
+    } : c));
+  };
+  const addStory = async (mediaUrl: string, mediaType: 'image' | 'video') => {
+    if (!currentUser) return;
+    setStories([{ id: Date.now().toString(), userId: currentUser.id, userName: currentUser.name, userAvatar: currentUser.avatar || '', mediaUrl, mediaType, timestamp: 'Agora', isViewed: false }, ...stories]);
+  };
+  const toggleUserPermission = async (userId: string, permission: 'suppliers' | 'courses') => {};
+  const updateUserAccess = async (userId: string, dueDate: string, supplierIds: string[], courseIds: string[]) => {};
+
   return (
     <AppContext.Provider value={{
-      user: currentUser, 
-      allUsers, 
-      isLoading,
-      login,
-      loginWithGoogle, 
-      register, 
-      logout,
-      
-      offers, 
-      suppliers, 
-      vipProducts, 
-      courses, 
-      stories, 
-      allMessages, // Expose raw messages
-      onlineCount,
-
-      addOffer, 
-      deleteOffer,
-      addHeat, 
-      addComment,
-      
-      addSupplier, 
-      updateSupplier, 
-      
-      addProduct, 
-      
-      addCourse, 
-      addModule, 
-      addLesson, 
-      updateLesson, 
-      
-      addStory, 
-      
-      sendMessage, 
-      
-      toggleUserPermission, 
-      updateUserAccess
+      user: currentUser, allUsers, isLoading, login, loginWithGoogle, register, logout,
+      offers, suppliers, vipProducts, courses, stories, communityMessages, privateMessages, onlineCount,
+      addOffer, deleteOffer, addHeat, addComment, addSupplier, updateSupplier, addProduct, addCourse, addModule, addLesson, updateLesson, addStory,
+      sendCommunityMessage, sendPrivateMessage, toggleUserPermission, updateUserAccess
     }}>
       {isLoading ? (
           <div className="min-h-screen bg-black flex items-center justify-center text-yellow-500 font-bold text-xl animate-pulse">

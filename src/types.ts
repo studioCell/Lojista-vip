@@ -112,6 +112,6 @@ export interface ChatMessage {
   senderName: string;
   senderAvatar?: string;
   imageUrl?: string;
-  channelId: string; // 'community' OR 'userA_userB'
-  createdAt: any; // Firestore Timestamp or ISO string
+  channelId: string; // 'community' OR 'userId' (for support)
+  createdAt: string; // ISO String
 }
