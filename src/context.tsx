@@ -211,11 +211,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       const q = query(collection(db, 'messages'), orderBy('createdAt', 'asc')); 
       const unsub = onSnapshot(q, (snap) => {
           const allMsgs = snap.docs.map(d => ({ id: d.id, ...d.data() } as ChatMessage));
-          
           setCommunityMessages(allMsgs.filter(m => m.channelId === 'community'));
-          
-          // For private messages, we fetch everything here and filter in the UI based on conversation context
-          // This assumes the volume of messages is manageable for the client in this version.
           setPrivateMessages(allMsgs.filter(m => m.channelId !== 'community'));
       });
       return () => unsub();
@@ -225,7 +221,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   useEffect(() => {
       const timer = setTimeout(() => {
           setDataLoading(false);
-          // Only seed if empty.
+          // Only seed if empty and admin (conceptually, here simply if empty)
           if (suppliers.length === 0) {
              INITIAL_SUPPLIERS.forEach(s => setDoc(doc(db, 'suppliers', s.id), s));
           }
@@ -429,16 +425,16 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
           channelId: 'community'
       };
+      
+      // Calculate isMine dynamically in the UI, don't save it
       const { isMine, id, ...msgData } = newMsg; 
       await addDoc(collection(db, 'messages'), { ...msgData, createdAt: new Date().toISOString() });
   };
 
-  // UPDATED: Now generates a consistent Channel ID between two users
+  // Generate a consistent Channel ID between two users: alphabetically sort IDs
   const sendPrivateMessage = async (text: string, targetUserId: string, imageUrl?: string) => {
       if (!currentUser) return;
       
-      // Create a unique channel ID by sorting user IDs (e.g. "abc_xyz")
-      // This ensures both UserA->UserB and UserB->UserA end up in the same "room"
       const channelId = [currentUser.id, targetUserId].sort().join('_');
 
       const newMsg: ChatMessage = {
@@ -449,7 +445,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           text,
           imageUrl,
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          channelId: channelId // Use the combined ID
+          channelId: channelId 
       };
       
       const { isMine, id, ...msgData } = newMsg;
@@ -462,7 +458,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       isMine: currentUser ? m.senderId === currentUser.id : false
   }));
 
-  // For private messages, we pass them raw. The UI will filter by channelId.
   const uiPrivateMessages = privateMessages.map(m => ({
       ...m,
       isMine: currentUser ? m.senderId === currentUser.id : false
@@ -487,9 +482,21 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       privateMessages: uiPrivateMessages, 
       onlineCount,
 
-      addOffer, deleteOffer, addHeat, addComment,
-      addSupplier, updateSupplier, addProduct, 
-      addCourse, addModule, addLesson, updateLesson, 
+      addOffer, 
+      deleteOffer,
+      addHeat, 
+      addComment,
+      
+      addSupplier, 
+      updateSupplier, 
+      
+      addProduct, 
+      
+      addCourse, 
+      addModule, 
+      addLesson, 
+      updateLesson, 
+      
       addStory, 
       
       sendCommunityMessage, 

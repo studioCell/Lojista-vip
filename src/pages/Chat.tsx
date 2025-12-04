@@ -59,7 +59,7 @@ const Chat: React.FC = () => {
   };
 
   const handleSendImage = () => {
-      // Simulation
+      // Simulation of image upload
       const imgUrl = `https://picsum.photos/400/300?random=${Date.now()}`;
       if (activeChatTarget === 'community') {
           sendCommunityMessage("Enviou uma imagem", imgUrl);
