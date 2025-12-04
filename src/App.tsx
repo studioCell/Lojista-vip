@@ -62,6 +62,10 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
           <button onClick={() => navigate('/')} className={`flex items-center space-x-3 w-full p-3 rounded-lg hover:bg-gray-800 transition ${isActive('/')}`}>
             <Home size={20} /> <span>Feed de Ofertas</span>
           </button>
+          {/* Chat moved here for quick access */}
+          <button onClick={() => navigate('/chat')} className={`flex items-center space-x-3 w-full p-3 rounded-lg hover:bg-gray-800 transition ${isActive('/chat')}`}>
+            <MessageCircle size={20} /> <span>Chat & Mensagens</span>
+          </button>
           <button onClick={() => navigate('/suppliers')} className={`flex items-center space-x-3 w-full p-3 rounded-lg hover:bg-gray-800 transition ${isActive('/suppliers')}`}>
             <Users size={20} /> <span>Fornecedores</span>
           </button>
@@ -70,9 +74,6 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
           </button>
           <button onClick={() => navigate('/courses')} className={`flex items-center space-x-3 w-full p-3 rounded-lg hover:bg-gray-800 transition ${isActive('/courses')}`}>
             <GraduationCap size={20} /> <span>Cursos</span>
-          </button>
-          <button onClick={() => navigate('/chat')} className={`flex items-center space-x-3 w-full p-3 rounded-lg hover:bg-gray-800 transition ${isActive('/chat')}`}>
-            <MessageCircle size={20} /> <span>Mensagens</span>
           </button>
           
           {user?.role === UserRole.ADMIN && (
@@ -108,10 +109,10 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
       {isMobileMenuOpen && (
         <div className="md:hidden fixed inset-0 bg-dark-surface z-40 pt-20 px-6 space-y-4">
            <button onClick={() => { navigate('/'); setIsMobileMenuOpen(false); }} className="block w-full text-left py-3 border-b border-gray-800">Feed de Ofertas</button>
+           <button onClick={() => { navigate('/chat'); setIsMobileMenuOpen(false); }} className="block w-full text-left py-3 border-b border-gray-800 text-yellow-400">Chat & Mensagens</button>
            <button onClick={() => { navigate('/suppliers'); setIsMobileMenuOpen(false); }} className="block w-full text-left py-3 border-b border-gray-800">Fornecedores</button>
            <button onClick={() => { navigate('/store'); setIsMobileMenuOpen(false); }} className="block w-full text-left py-3 border-b border-gray-800">VIP Store</button>
            <button onClick={() => { navigate('/courses'); setIsMobileMenuOpen(false); }} className="block w-full text-left py-3 border-b border-gray-800">Cursos</button>
-           <button onClick={() => { navigate('/chat'); setIsMobileMenuOpen(false); }} className="block w-full text-left py-3 border-b border-gray-800">Mensagens</button>
            {user?.role === UserRole.ADMIN && (
              <button onClick={() => { navigate('/admin'); setIsMobileMenuOpen(false); }} className="block w-full text-left py-3 border-b border-gray-800 text-yellow-400">Painel Admin</button>
            )}
@@ -129,6 +130,10 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
         <button onClick={() => navigate('/')} className={`flex flex-col items-center ${isActive('/')}`}>
           <Home size={20} />
           <span className="text-[10px] mt-1">Feed</span>
+        </button>
+        <button onClick={() => navigate('/chat')} className={`flex flex-col items-center ${isActive('/chat')}`}>
+          <MessageCircle size={20} />
+          <span className="text-[10px] mt-1">Chat</span>
         </button>
         <button onClick={() => navigate('/suppliers')} className={`flex flex-col items-center ${isActive('/suppliers')}`}>
           <Users size={20} />

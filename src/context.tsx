@@ -104,7 +104,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const authUnsub = onAuthStateChanged(auth, async (firebaseUser: FirebaseUser | null) => {
         if (firebaseUser) {
             // Setup Real-time listener for the User Profile
-            // This ensures if Admin updates permissions, the user sees it INSTANTLY.
             const userRef = doc(db, 'users', firebaseUser.uid);
             
             userUnsub = onSnapshot(userRef, (docSnap) => {
@@ -182,10 +181,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       const unsub = onSnapshot(q, (snap) => {
           const list = snap.docs.map(d => ({ id: d.id, ...d.data() } as Supplier));
           setSuppliers(list);
-          // If empty and not loading, seed
-          if (list.length === 0 && !isLoading) {
-             // Optional: seedSuppliers();
-          }
       });
       return () => unsub();
   }, [isLoading]);
@@ -197,7 +192,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       return () => unsub();
   }, []);
 
-  // Sync Courses (Real-time updates for everyone)
+  // Sync Courses
   useEffect(() => {
       const q = query(collection(db, 'courses'));
       const unsub = onSnapshot(q, (snap) => setCourses(snap.docs.map(d => ({ id: d.id, ...d.data() } as Course))));
@@ -211,12 +206,16 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       return () => unsub();
   }, []);
 
-  // Sync Messages
+  // Sync Messages (Both Community and Private)
   useEffect(() => {
       const q = query(collection(db, 'messages'), orderBy('createdAt', 'asc')); 
       const unsub = onSnapshot(q, (snap) => {
           const allMsgs = snap.docs.map(d => ({ id: d.id, ...d.data() } as ChatMessage));
+          
           setCommunityMessages(allMsgs.filter(m => m.channelId === 'community'));
+          
+          // For private messages, we fetch everything here and filter in the UI based on conversation context
+          // This assumes the volume of messages is manageable for the client in this version.
           setPrivateMessages(allMsgs.filter(m => m.channelId !== 'community'));
       });
       return () => unsub();
@@ -302,16 +301,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   // --- 5. DATA ACTIONS (FIRESTORE) ---
 
-  // USERS
   const toggleUserPermission = async (userId: string, permission: 'suppliers' | 'courses') => {
       const u = allUsers.find(user => user.id === userId);
       if (!u) return;
-      
-      const newPermissions = {
-          ...u.permissions,
-          [permission]: !u.permissions[permission]
-      };
-      
+      const newPermissions = { ...u.permissions, [permission]: !u.permissions[permission] };
       await updateDoc(doc(db, 'users', userId), { permissions: newPermissions });
   };
 
@@ -323,12 +316,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       });
   };
 
-  // OFFERS
   const addOffer = async (offer: Offer) => {
       const cleanOffer = JSON.parse(JSON.stringify(offer));
       delete cleanOffer.id; 
-      cleanOffer.createdAt = new Date().toISOString(); // sort key
-      
+      cleanOffer.createdAt = new Date().toISOString(); 
       await addDoc(collection(db, 'offers'), cleanOffer);
   };
 
@@ -337,9 +328,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   };
 
   const addHeat = async (offerId: string) => {
-      await updateDoc(doc(db, 'offers', offerId), {
-          likes: increment(1)
-      });
+      await updateDoc(doc(db, 'offers', offerId), { likes: increment(1) });
   };
 
   const addComment = async (offerId: string, text: string) => {
@@ -352,12 +341,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           text,
           timestamp: 'Agora' 
       };
-      await updateDoc(doc(db, 'offers', offerId), {
-          comments: arrayUnion(newComment)
-      });
+      await updateDoc(doc(db, 'offers', offerId), { comments: arrayUnion(newComment) });
   };
 
-  // SUPPLIERS
   const addSupplier = async (supplier: Supplier) => {
       const clean = JSON.parse(JSON.stringify(supplier));
       await setDoc(doc(db, 'suppliers', supplier.id), clean);
@@ -367,13 +353,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       await updateDoc(doc(db, 'suppliers', id), updates);
   };
 
-  // VIP PRODUCTS
   const addProduct = async (product: VipProduct) => {
       const clean = JSON.parse(JSON.stringify(product));
       await setDoc(doc(db, 'vip_products', product.id), clean);
   };
 
-  // COURSES
   const addCourse = async (course: Course) => {
       const clean = JSON.parse(JSON.stringify(course));
       await setDoc(doc(db, 'courses', course.id), clean);
@@ -383,15 +367,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       const courseRef = doc(db, 'courses', courseId);
       const courseSnap = await getDoc(courseRef);
       if (!courseSnap.exists()) return;
-
       const courseData = courseSnap.data() as Course;
-      const newModule: CourseModule = {
-          id: Date.now().toString(),
-          title,
-          lessons: []
-      };
+      const newModule: CourseModule = { id: Date.now().toString(), title, lessons: [] };
       const updatedModules = [...courseData.modules, newModule];
-      
       await updateDoc(courseRef, { modules: updatedModules });
   };
 
@@ -399,26 +377,18 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       const courseRef = doc(db, 'courses', courseId);
       const courseSnap = await getDoc(courseRef);
       if (!courseSnap.exists()) return;
-
       const courseData = courseSnap.data() as Course;
       const updatedModules = courseData.modules.map(m => {
-          if (m.id === moduleId) {
-              return { ...m, lessons: [...m.lessons, lesson] };
-          }
+          if (m.id === moduleId) return { ...m, lessons: [...m.lessons, lesson] };
           return m;
       });
-
-      await updateDoc(courseRef, { 
-          modules: updatedModules,
-          lessonCount: increment(1)
-      });
+      await updateDoc(courseRef, { modules: updatedModules, lessonCount: increment(1) });
   };
 
   const updateLesson = async (courseId: string, moduleId: string, lessonId: string, updates: Partial<Lesson>) => {
       const courseRef = doc(db, 'courses', courseId);
       const courseSnap = await getDoc(courseRef);
       if (!courseSnap.exists()) return;
-
       const courseData = courseSnap.data() as Course;
       const updatedModules = courseData.modules.map(m => {
           if (m.id === moduleId) {
@@ -430,14 +400,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           }
           return m;
       });
-
       await updateDoc(courseRef, { modules: updatedModules });
   };
 
-  // STORIES
   const addStory = async (mediaUrl: string, mediaType: 'image' | 'video') => {
       if (!currentUser) return;
-      
       await addDoc(collection(db, 'stories'), {
           userId: currentUser.id,
           userName: currentUser.name,
@@ -450,7 +417,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       });
   };
 
-  // MESSAGES
   const sendCommunityMessage = async (text: string, imageUrl?: string) => {
       if (!currentUser) return;
       const newMsg: ChatMessage = {
@@ -463,13 +429,18 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
           channelId: 'community'
       };
-      
       const { isMine, id, ...msgData } = newMsg; 
       await addDoc(collection(db, 'messages'), { ...msgData, createdAt: new Date().toISOString() });
   };
 
+  // UPDATED: Now generates a consistent Channel ID between two users
   const sendPrivateMessage = async (text: string, targetUserId: string, imageUrl?: string) => {
       if (!currentUser) return;
+      
+      // Create a unique channel ID by sorting user IDs (e.g. "abc_xyz")
+      // This ensures both UserA->UserB and UserB->UserA end up in the same "room"
+      const channelId = [currentUser.id, targetUserId].sort().join('_');
+
       const newMsg: ChatMessage = {
           id: Date.now().toString(),
           senderId: currentUser.id,
@@ -478,19 +449,20 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           text,
           imageUrl,
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          channelId: targetUserId 
+          channelId: channelId // Use the combined ID
       };
       
       const { isMine, id, ...msgData } = newMsg;
       await addDoc(collection(db, 'messages'), { ...msgData, createdAt: new Date().toISOString() });
   };
 
-  // Transform messages for UI (calculate isMine dynamically based on currentUser)
+  // Transform messages for UI
   const uiCommunityMessages = communityMessages.map(m => ({
       ...m,
       isMine: currentUser ? m.senderId === currentUser.id : false
   }));
 
+  // For private messages, we pass them raw. The UI will filter by channelId.
   const uiPrivateMessages = privateMessages.map(m => ({
       ...m,
       isMine: currentUser ? m.senderId === currentUser.id : false
@@ -515,21 +487,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       privateMessages: uiPrivateMessages, 
       onlineCount,
 
-      addOffer, 
-      deleteOffer,
-      addHeat, 
-      addComment,
-      
-      addSupplier, 
-      updateSupplier, 
-      
-      addProduct, 
-      
-      addCourse, 
-      addModule, 
-      addLesson, 
-      updateLesson, 
-      
+      addOffer, deleteOffer, addHeat, addComment,
+      addSupplier, updateSupplier, addProduct, 
+      addCourse, addModule, addLesson, updateLesson, 
       addStory, 
       
       sendCommunityMessage, 
