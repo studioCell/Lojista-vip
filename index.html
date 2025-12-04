@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="pt-BR" class="dark">
   <head>
@@ -15,6 +16,15 @@
               secondary: '#1F2937', // Gray-800
               dark: '#020617', // Slate-950
               'dark-surface': '#0F172A', // Slate-900
+            },
+            animation: {
+              'fade-in': 'fadeIn 0.5s ease-out forwards',
+            },
+            keyframes: {
+              fadeIn: {
+                '0%': { opacity: '0', transform: 'translateY(10px)' },
+                '100%': { opacity: '1', transform: 'translateY(0)' },
+              }
             }
           }
         }
@@ -43,6 +53,7 @@
   <script type="importmap">
 {
   "imports": {
+    "react-dom/client": "https://aistudiocdn.com/react-dom@^19.2.1/client",
     "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.1/",
     "react-router-dom": "https://aistudiocdn.com/react-router-dom@^7.10.0",
     "react/": "https://aistudiocdn.com/react@^19.2.1/",

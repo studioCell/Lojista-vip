@@ -73,8 +73,15 @@ const AppContext = createContext<AppContextType | undefined>(undefined);
 
 // Helper to load from local storage or fallback to initial data
 const loadFromStorage = (key: string, fallback: any) => {
-  const saved = localStorage.getItem(key);
-  return saved ? JSON.parse(saved) : fallback;
+  try {
+    const saved = localStorage.getItem(key);
+    return saved ? JSON.parse(saved) : fallback;
+  } catch (error) {
+    console.warn(`Error loading ${key} from storage, resetting to default.`, error);
+    // If corrupted, remove it so it works next time
+    try { localStorage.removeItem(key); } catch (e) {}
+    return fallback;
+  }
 };
 
 export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
