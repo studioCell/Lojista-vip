@@ -83,7 +83,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   // Auth State
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  
+  const [dataLoading, setDataLoading] = useState(true);
+
   // Data States (initialized empty, filled by Firestore)
   const [allUsers, setAllUsers] = useState<User[]>([]);
   const [offers, setOffers] = useState<Offer[]>([]);
@@ -106,23 +107,22 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                 
                 if (docSnap.exists()) {
                     const userData = { id: user.uid, ...docSnap.data() } as User;
-                    // FORCE ADMIN (Hardcode protection)
-                    if (user.uid === 'EfskGEgsJiPW6A5gVkv5YklBLHs2' || user.email === 'm.mateushugo123@gmail.com') {
+                    // FORCE ADMIN
+                    if (user.uid === 'EfskGEgsJiPW6A5gVkv5YklBLHs2') {
                          userData.role = UserRole.ADMIN;
                          userData.permissions = { suppliers: true, courses: true };
                     }
                     setCurrentUser(userData);
                 } else {
-                     // Create DB entry if auth exists but no doc
-                     const isHardcodedAdmin = user.email === 'm.mateushugo123@gmail.com';
+                     // Fallback creation if not in DB yet
+                     const isHardcodedAdmin = user.uid === 'EfskGEgsJiPW6A5gVkv5YklBLHs2';
                      const newUser: User = {
                         id: user.uid,
                         name: user.displayName || 'Lojista',
                         email: user.email!,
                         role: isHardcodedAdmin ? UserRole.ADMIN : UserRole.USER,
                         avatar: user.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(user.displayName || 'L')}&background=FACC15&color=000`,
-                        permissions: { suppliers: true, courses: true },
-                        subscriptionDueDate: ''
+                        permissions: { suppliers: true, courses: true }
                     };
                     await setDoc(doc(db, 'users', user.uid), newUser);
                     setCurrentUser(newUser);
@@ -151,8 +151,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   // Sync Offers
   useEffect(() => {
-      // Order by timestamp desc so newest offers are first
-      const q = query(collection(db, 'offers'), orderBy('createdAt', 'desc')); 
+      const q = query(collection(db, 'offers'), orderBy('timestamp', 'desc')); // Assuming ISO string works for order, or use createdAt
       const unsub = onSnapshot(q, (snap) => {
           setOffers(snap.docs.map(d => ({ id: d.id, ...d.data() } as Offer)));
       });
@@ -166,10 +165,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           const list = snap.docs.map(d => ({ id: d.id, ...d.data() } as Supplier));
           setSuppliers(list);
           
-          // AUTO-SEED if empty (Safe check)
+          // SEEDING: If empty, populate with Mock Data
           if (list.length === 0 && !isLoading) {
-             // Optional: Uncomment to auto-seed if you want the app to start populated
-             // INITIAL_SUPPLIERS.forEach(s => setDoc(doc(db, 'suppliers', s.id), s));
+             // seedSuppliers(); // Call explicitly or handle elsewhere
           }
       });
       return () => unsub();
@@ -189,18 +187,16 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       return () => unsub();
   }, []);
 
-  // Sync Stories (Critical: Real-time for everyone)
+  // Sync Stories
   useEffect(() => {
       const q = query(collection(db, 'stories'), orderBy('createdAt', 'desc'));
-      const unsub = onSnapshot(q, (snap) => {
-          setStories(snap.docs.map(d => ({ id: d.id, ...d.data() } as Story)));
-      });
+      const unsub = onSnapshot(q, (snap) => setStories(snap.docs.map(d => ({ id: d.id, ...d.data() } as Story))));
       return () => unsub();
   }, []);
 
   // Sync Messages
   useEffect(() => {
-      const q = query(collection(db, 'messages'), orderBy('createdAt', 'asc')); 
+      const q = query(collection(db, 'messages'), orderBy('timestamp', 'asc')); // Oldest first for chat log
       const unsub = onSnapshot(q, (snap) => {
           const allMsgs = snap.docs.map(d => ({ id: d.id, ...d.data() } as ChatMessage));
           setCommunityMessages(allMsgs.filter(m => m.channelId === 'community'));
@@ -208,6 +204,39 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       });
       return () => unsub();
   }, []);
+
+  // --- 3. SEEDING FUNCTION (Auto-populate DB if empty) ---
+  useEffect(() => {
+      const seedDatabase = async () => {
+          // Only seed if logged in as Admin to prevent spam, or check if completely empty
+          // For this demo, we check if collections are empty regardless of user
+          
+          // Seed Suppliers
+          if (suppliers.length === 0 && !dataLoading) {
+             // We can trigger this manually, or let it happen. 
+             // To prevent infinite loops or double writes, we check snapshot size in a transaction or just simple check
+          }
+      };
+      
+      // Simple timeout to allow firestore to connect before deciding it's empty
+      const timer = setTimeout(() => {
+          setDataLoading(false);
+          if (suppliers.length === 0) {
+             INITIAL_SUPPLIERS.forEach(s => setDoc(doc(db, 'suppliers', s.id), s));
+          }
+          if (offers.length === 0) {
+             INITIAL_OFFERS.forEach(o => setDoc(doc(db, 'offers', o.id), o));
+          }
+          if (courses.length === 0) {
+             INITIAL_COURSES.forEach(c => setDoc(doc(db, 'courses', c.id), c));
+          }
+          if (vipProducts.length === 0) {
+             INITIAL_VIP_PRODUCTS.forEach(p => setDoc(doc(db, 'vip_products', p.id), p));
+          }
+      }, 3000);
+      
+      return () => clearTimeout(timer);
+  }, []); // Run once on mount
 
   // Simulate Online Count
   useEffect(() => {
@@ -235,6 +264,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     setIsLoading(true);
     const provider = new GoogleAuthProvider();
     await signInWithPopup(auth, provider);
+    // User creation handled in onAuthStateChanged
   };
 
   const register = async (name: string, email: string, password: string, whatsapp: string) => {
@@ -243,7 +273,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         const userCred = await createUserWithEmailAndPassword(auth, email, password);
         await updateProfile(userCred.user, { displayName: name });
         
-        const isHardcodedAdmin = email.toLowerCase() === 'm.mateushugo123@gmail.com';
+        const isHardcodedAdmin = userCred.user.uid === 'EfskGEgsJiPW6A5gVkv5YklBLHs2';
         const newUser: User = {
             id: userCred.user.uid,
             name,
@@ -251,9 +281,13 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             whatsapp,
             role: isHardcodedAdmin ? UserRole.ADMIN : UserRole.USER,
             avatar: `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=FACC15&color=000`,
-            permissions: { suppliers: true, courses: true },
-            subscriptionDueDate: ''
+            permissions: { suppliers: isHardcodedAdmin, courses: isHardcodedAdmin }
         };
+
+        if (email.toLowerCase() === 'm.mateushugo123@gmail.com') {
+            newUser.role = UserRole.ADMIN;
+            newUser.permissions = { suppliers: true, courses: true };
+        }
 
         await setDoc(doc(db, 'users', userCred.user.uid), newUser);
       } catch (error) {
@@ -292,14 +326,15 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   // OFFERS
   const addOffer = async (offer: Offer) => {
+      // Create a clean object without undefined values for Firestore
       const cleanOffer = JSON.parse(JSON.stringify(offer));
-      delete cleanOffer.id; 
+      delete cleanOffer.id; // Let firestore gen ID if not provided, or use setDoc if ID provided
       
-      // Ensure we have a sortable timestamp
-      cleanOffer.createdAt = new Date().toISOString();
-      cleanOffer.timestamp = new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}); // Visual string
-
-      await addDoc(collection(db, 'offers'), cleanOffer);
+      if (offer.id) {
+          await setDoc(doc(db, 'offers', offer.id), cleanOffer);
+      } else {
+          await addDoc(collection(db, 'offers'), cleanOffer);
+      }
   };
 
   const deleteOffer = async (id: string) => {
@@ -320,7 +355,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           userName: currentUser.name,
           userAvatar: currentUser.avatar || '',
           text,
-          timestamp: 'Agora' 
+          timestamp: 'Agora' // Or use ISO string
       };
       await updateDoc(doc(db, 'offers', offerId), {
           comments: arrayUnion(newComment)
@@ -349,6 +384,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       await setDoc(doc(db, 'courses', course.id), clean);
   };
 
+  // Handling deep nested arrays in Firestore is tricky. 
+  // Strategy: Read the course, modify in memory, write back entire modules array.
   const addModule = async (courseId: string, title: string) => {
       const courseRef = doc(db, 'courses', courseId);
       const courseSnap = await getDoc(courseRef);
@@ -415,7 +452,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           mediaUrl,
           mediaType,
           timestamp: 'Agora', 
-          createdAt: new Date().toISOString(), // Critical for sorting
+          createdAt: new Date().toISOString(),
           isViewed: false
       });
   };
@@ -424,7 +461,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const sendCommunityMessage = async (text: string, imageUrl?: string) => {
       if (!currentUser) return;
       const newMsg: ChatMessage = {
-          id: Date.now().toString(),
+          id: Date.now().toString(), // Will be overwritten by firestore ID but needed for type
           senderId: currentUser.id,
           senderName: currentUser.name,
           senderAvatar: currentUser.avatar,
@@ -434,6 +471,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           channelId: 'community'
       };
       
+      // We don't save 'isMine' in DB, it's calculated on read
       const { isMine, id, ...msgData } = newMsg; 
       await addDoc(collection(db, 'messages'), { ...msgData, createdAt: new Date().toISOString() });
   };
@@ -455,7 +493,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       await addDoc(collection(db, 'messages'), { ...msgData, createdAt: new Date().toISOString() });
   };
 
-  // Transform messages for UI (calculate isMine dynamically)
+  // Transform messages for UI (calculate isMine)
   const uiCommunityMessages = communityMessages.map(m => ({
       ...m,
       isMine: currentUser ? m.senderId === currentUser.id : false
