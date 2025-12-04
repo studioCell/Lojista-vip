@@ -11,11 +11,11 @@ const Login: React.FC = () => {
   // State for toggling modes
   const [isRegistering, setIsRegistering] = useState(false);
 
-  // Form Fields
+  // Form Fields - Pre-filled with Admin Credentials
   const [name, setName] = useState('');
-  const [email, setEmail] = useState('');
+  const [email, setEmail] = useState('m.mateushugo123@gmail.com');
   const [whatsapp, setWhatsapp] = useState('');
-  const [password, setPassword] = useState('');
+  const [password, setPassword] = useState('12345678');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [rememberMe, setRememberMe] = useState(false);
   
@@ -23,7 +23,7 @@ const Login: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
 
-  // Load saved credentials on mount
+  // Load saved credentials on mount (overrides defaults if exists)
   useEffect(() => {
     const savedCreds = localStorage.getItem('lv_saved_creds');
     if (savedCreds) {
@@ -79,30 +79,43 @@ const Login: React.FC = () => {
                 return;
             }
             await register(name, email, password, whatsapp);
-            // Register automatically logs in
             navigate('/');
         } else {
             // LOGIN LOGIC
-            const success = await login(email, password);
-            if (success) {
-                // Handle Remember Me
-                if (rememberMe) {
-                    localStorage.setItem('lv_saved_creds', JSON.stringify({ email, password }));
+            try {
+                const success = await login(email, password);
+                if (success) {
+                    if (rememberMe) {
+                        localStorage.setItem('lv_saved_creds', JSON.stringify({ email, password }));
+                    } else {
+                        localStorage.removeItem('lv_saved_creds');
+                    }
+                    navigate('/');
                 } else {
-                    localStorage.removeItem('lv_saved_creds');
+                    // Usually handled by catch, but just in case
+                     throw new Error('Falha no login.');
                 }
-                navigate('/');
-            } else {
-                // Usually login returns false if failed inside context, but context might throw too.
-                // If context catches and returns false, we show generic error.
-                // If context throws, it goes to catch block below.
-                // Since we updated context to throw/return, let's assume catch handles detailed errors.
+            } catch (loginError: any) {
+                // AUTO-CREATE ADMIN LOGIC
+                // If login fails because user not found, AND it's the specific admin email, create it.
+                if ((loginError.code === 'auth/user-not-found' || loginError.code === 'auth/invalid-credential') && email === 'm.mateushugo123@gmail.com') {
+                    setErrorMsg("Conta Admin não encontrada. Criando automaticamente...");
+                    try {
+                        await register('Mateus Hugo (Admin)', email, password, '11999999999');
+                        navigate('/admin');
+                        return;
+                    } catch (regError: any) {
+                        console.error("Failed auto-admin creation", regError);
+                        // Fall back to showing the original login error if creation fails
+                        throw loginError;
+                    }
+                } else {
+                    throw loginError;
+                }
             }
         }
     } catch (err: any) {
         console.error("Auth Error:", err);
-        // Firebase errors usually come as "Firebase: Error (auth/code)."
-        // We try to extract the code or use the message
         let code = 'unknown';
         if (err.message && err.message.includes('(auth/')) {
            const match = err.message.match(/\(auth\/([^)]+)\)/);

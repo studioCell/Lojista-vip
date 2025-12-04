@@ -205,9 +205,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     try {
         await signInWithEmailAndPassword(auth, email, password || '');
         return true;
-    } catch (error) {
+    } catch (error: any) {
         console.error("Login failed", error);
-        return false;
+        throw error; // Re-throw to handle in UI
     }
   };
 
@@ -227,7 +227,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           };
 
           // Admin Override check (Hardcoded for demo)
-          if (email === 'm.mateushugo123@gmail.com') {
+          if (email.toLowerCase() === 'm.mateushugo123@gmail.com') {
               newUser.role = UserRole.ADMIN;
               newUser.permissions = { suppliers: true, courses: true };
           }
