@@ -29,8 +29,6 @@ import {
   Unsubscribe
 } from 'firebase/firestore';
 
-// --- Types & Context Definition ---
-
 interface AppContextType {
   user: User | null;
   allUsers: User[];
@@ -40,17 +38,14 @@ interface AppContextType {
   register: (name: string, email: string, password: string, whatsapp: string) => Promise<void>;
   logout: () => void;
   
-  // Data
   offers: Offer[];
   suppliers: Supplier[];
   vipProducts: VipProduct[];
   courses: Course[];
   stories: Story[];
-  communityMessages: ChatMessage[];
-  privateMessages: ChatMessage[]; 
+  allMessages: ChatMessage[]; // Unified message stream
   onlineCount: number;
 
-  // Actions
   addOffer: (offer: Offer) => Promise<void>;
   deleteOffer: (id: string) => Promise<void>;
   addHeat: (offerId: string) => Promise<void>;
@@ -68,8 +63,7 @@ interface AppContextType {
   
   addStory: (mediaUrl: string, mediaType: 'image' | 'video') => Promise<void>;
   
-  sendCommunityMessage: (text: string, imageUrl?: string) => Promise<void>;
-  sendPrivateMessage: (text: string, targetUserId: string, imageUrl?: string) => Promise<void>;
+  sendMessage: (text: string, targetId: string, imageUrl?: string) => Promise<void>;
   
   toggleUserPermission: (userId: string, permission: 'suppliers' | 'courses') => Promise<void>;
   updateUserAccess: (userId: string, dueDate: string, supplierIds: string[], courseIds: string[]) => Promise<void>;
@@ -77,23 +71,20 @@ interface AppContextType {
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
-// --- Provider ---
-
 export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  // Auth State
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [dataLoading, setDataLoading] = useState(true);
 
-  // Data States (initialized empty, filled by Firestore)
+  // Data States
   const [allUsers, setAllUsers] = useState<User[]>([]);
   const [offers, setOffers] = useState<Offer[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [vipProducts, setVipProducts] = useState<VipProduct[]>([]);
   const [courses, setCourses] = useState<Course[]>([]);
   const [stories, setStories] = useState<Story[]>([]);
-  const [communityMessages, setCommunityMessages] = useState<ChatMessage[]>([]);
-  const [privateMessages, setPrivateMessages] = useState<ChatMessage[]>([]);
+  
+  // Real-time Chat
+  const [allMessages, setAllMessages] = useState<ChatMessage[]>([]);
   
   const [onlineCount, setOnlineCount] = useState(24);
 
@@ -103,21 +94,18 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
     const authUnsub = onAuthStateChanged(auth, async (firebaseUser: FirebaseUser | null) => {
         if (firebaseUser) {
-            // Setup Real-time listener for the User Profile
             const userRef = doc(db, 'users', firebaseUser.uid);
-            
             userUnsub = onSnapshot(userRef, (docSnap) => {
                 if (docSnap.exists()) {
                     const userData = { id: firebaseUser.uid, ...docSnap.data() } as User;
-                    
-                    // Force Admin Role for specific email
+                    // Force Admin Role check
                     if (firebaseUser.email === 'm.mateushugo123@gmail.com') {
                          userData.role = UserRole.ADMIN;
                          userData.permissions = { suppliers: true, courses: true };
                     }
                     setCurrentUser(userData);
                 } else {
-                     // Create DB entry if it doesn't exist (fallback)
+                     // Create DB entry if it doesn't exist
                      const isHardcodedAdmin = firebaseUser.email === 'm.mateushugo123@gmail.com';
                      const newUser: User = {
                         id: firebaseUser.uid,
@@ -138,7 +126,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                 console.error("User Snapshot Error:", error);
                 setIsLoading(false);
             });
-
         } else {
             setCurrentUser(null);
             setIsLoading(false);
@@ -157,92 +144,69 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   // --- 2. DATA LISTENERS (REAL-TIME DATABASE) ---
 
-  // Sync Users
   useEffect(() => {
       const q = query(collection(db, 'users'));
-      const unsub = onSnapshot(q, (snap) => {
-          setAllUsers(snap.docs.map(d => ({ id: d.id, ...d.data() } as User)));
-      });
-      return () => unsub();
+      return onSnapshot(q, (snap) => setAllUsers(snap.docs.map(d => ({ id: d.id, ...d.data() } as User))));
   }, []);
 
-  // Sync Offers
   useEffect(() => {
       const q = query(collection(db, 'offers'), orderBy('createdAt', 'desc')); 
-      const unsub = onSnapshot(q, (snap) => {
-          setOffers(snap.docs.map(d => ({ id: d.id, ...d.data() } as Offer)));
-      });
-      return () => unsub();
+      return onSnapshot(q, (snap) => setOffers(snap.docs.map(d => ({ id: d.id, ...d.data() } as Offer))));
   }, []);
 
-  // Sync Suppliers
   useEffect(() => {
       const q = query(collection(db, 'suppliers'));
       const unsub = onSnapshot(q, (snap) => {
           const list = snap.docs.map(d => ({ id: d.id, ...d.data() } as Supplier));
           setSuppliers(list);
+          // Initial Seed if empty
+          if (list.length === 0 && !isLoading) {
+             INITIAL_SUPPLIERS.forEach(s => setDoc(doc(db, 'suppliers', s.id), s));
+          }
       });
       return () => unsub();
   }, [isLoading]);
 
-  // Sync Products
   useEffect(() => {
       const q = query(collection(db, 'vip_products'));
-      const unsub = onSnapshot(q, (snap) => setVipProducts(snap.docs.map(d => ({ id: d.id, ...d.data() } as VipProduct))));
+      const unsub = onSnapshot(q, (snap) => {
+          const list = snap.docs.map(d => ({ id: d.id, ...d.data() } as VipProduct));
+          setVipProducts(list);
+          if (list.length === 0 && !isLoading) {
+             INITIAL_VIP_PRODUCTS.forEach(p => setDoc(doc(db, 'vip_products', p.id), p));
+          }
+      });
       return () => unsub();
-  }, []);
+  }, [isLoading]);
 
-  // Sync Courses
   useEffect(() => {
       const q = query(collection(db, 'courses'));
-      const unsub = onSnapshot(q, (snap) => setCourses(snap.docs.map(d => ({ id: d.id, ...d.data() } as Course))));
+      const unsub = onSnapshot(q, (snap) => {
+          const list = snap.docs.map(d => ({ id: d.id, ...d.data() } as Course));
+          setCourses(list);
+          if (list.length === 0 && !isLoading) {
+             INITIAL_COURSES.forEach(c => setDoc(doc(db, 'courses', c.id), c));
+          }
+      });
       return () => unsub();
-  }, []);
+  }, [isLoading]);
 
-  // Sync Stories
   useEffect(() => {
       const q = query(collection(db, 'stories'), orderBy('createdAt', 'desc'));
-      const unsub = onSnapshot(q, (snap) => setStories(snap.docs.map(d => ({ id: d.id, ...d.data() } as Story))));
-      return () => unsub();
+      return onSnapshot(q, (snap) => setStories(snap.docs.map(d => ({ id: d.id, ...d.data() } as Story))));
   }, []);
 
-  // Sync Messages (Both Community and Private)
+  // --- REAL TIME MESSAGES ---
   useEffect(() => {
+      // Listen to ALL messages ordered by time.
+      // Filtering happens in the UI component for performance/simplicity in this architecture.
       const q = query(collection(db, 'messages'), orderBy('createdAt', 'asc')); 
       const unsub = onSnapshot(q, (snap) => {
-          const allMsgs = snap.docs.map(d => ({ id: d.id, ...d.data() } as ChatMessage));
-          setCommunityMessages(allMsgs.filter(m => m.channelId === 'community'));
-          setPrivateMessages(allMsgs.filter(m => m.channelId !== 'community'));
+          const msgs = snap.docs.map(d => ({ id: d.id, ...d.data() } as ChatMessage));
+          setAllMessages(msgs);
       });
       return () => unsub();
   }, []);
-
-  // --- 3. SEEDING FUNCTION ---
-  useEffect(() => {
-      const timer = setTimeout(() => {
-          setDataLoading(false);
-          // Only seed if empty and admin (conceptually, here simply if empty)
-          if (suppliers.length === 0) {
-             INITIAL_SUPPLIERS.forEach(s => setDoc(doc(db, 'suppliers', s.id), s));
-          }
-          if (courses.length === 0) {
-             INITIAL_COURSES.forEach(c => setDoc(doc(db, 'courses', c.id), c));
-          }
-          if (vipProducts.length === 0) {
-             INITIAL_VIP_PRODUCTS.forEach(p => setDoc(doc(db, 'vip_products', p.id), p));
-          }
-      }, 3000);
-      return () => clearTimeout(timer);
-  }, []); 
-
-  // Simulate Online Count
-  useEffect(() => {
-    const interval = setInterval(() => {
-        setOnlineCount(prev => Math.max(10, prev + (Math.floor(Math.random() * 5) - 2)));
-    }, 5000);
-    return () => clearInterval(interval);
-  }, []);
-
 
   // --- 4. AUTH ACTIONS ---
 
@@ -413,55 +377,31 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       });
   };
 
-  const sendCommunityMessage = async (text: string, imageUrl?: string) => {
-      if (!currentUser) return;
-      const newMsg: ChatMessage = {
-          id: Date.now().toString(),
-          senderId: currentUser.id,
-          senderName: currentUser.name,
-          senderAvatar: currentUser.avatar,
-          text,
-          imageUrl,
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          channelId: 'community'
-      };
-      
-      // Calculate isMine dynamically in the UI, don't save it
-      const { isMine, id, ...msgData } = newMsg; 
-      await addDoc(collection(db, 'messages'), { ...msgData, createdAt: new Date().toISOString() });
-  };
-
-  // Generate a consistent Channel ID between two users: alphabetically sort IDs
-  const sendPrivateMessage = async (text: string, targetUserId: string, imageUrl?: string) => {
+  // Unified Send Message Function
+  const sendMessage = async (text: string, targetId: string, imageUrl?: string) => {
       if (!currentUser) return;
       
-      const channelId = [currentUser.id, targetUserId].sort().join('_');
+      // Determine Channel ID
+      let channelId = 'community';
+      if (targetId !== 'community') {
+          // Private chat: Create a unique ID derived from both user IDs
+          // Example: userA + userB => sort => "userA_userB"
+          // This ensures both users look at the same channel
+          channelId = [currentUser.id, targetId].sort().join('_');
+      }
 
-      const newMsg: ChatMessage = {
-          id: Date.now().toString(),
+      const newMsg = {
           senderId: currentUser.id,
           senderName: currentUser.name,
-          senderAvatar: currentUser.avatar,
+          senderAvatar: currentUser.avatar || '',
           text,
-          imageUrl,
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          channelId: channelId 
+          imageUrl: imageUrl || null,
+          channelId: channelId,
+          createdAt: new Date().toISOString()
       };
       
-      const { isMine, id, ...msgData } = newMsg;
-      await addDoc(collection(db, 'messages'), { ...msgData, createdAt: new Date().toISOString() });
+      await addDoc(collection(db, 'messages'), newMsg);
   };
-
-  // Transform messages for UI
-  const uiCommunityMessages = communityMessages.map(m => ({
-      ...m,
-      isMine: currentUser ? m.senderId === currentUser.id : false
-  }));
-
-  const uiPrivateMessages = privateMessages.map(m => ({
-      ...m,
-      isMine: currentUser ? m.senderId === currentUser.id : false
-  }));
 
   return (
     <AppContext.Provider value={{
@@ -478,8 +418,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       vipProducts, 
       courses, 
       stories, 
-      communityMessages: uiCommunityMessages, 
-      privateMessages: uiPrivateMessages, 
+      allMessages, // Expose raw messages
       onlineCount,
 
       addOffer, 
@@ -499,8 +438,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       
       addStory, 
       
-      sendCommunityMessage, 
-      sendPrivateMessage, 
+      sendMessage, 
       
       toggleUserPermission, 
       updateUserAccess

@@ -8,7 +8,7 @@ export interface User {
   id: string;
   name: string;
   email: string;
-  password?: string; // Kept for legacy typing, but Firebase Auth handles this
+  password?: string; 
   whatsapp?: string; 
   role: UserRole;
   avatar?: string;
@@ -107,12 +107,11 @@ export interface Lesson {
 
 export interface ChatMessage {
   id: string;
-  senderId: string;
-  senderName: string; 
-  senderAvatar?: string; 
   text: string;
-  imageUrl?: string; 
-  timestamp: string;
-  isMine?: boolean; // Optional because derived at runtime
-  channelId?: string; 
+  senderId: string;
+  senderName: string;
+  senderAvatar?: string;
+  imageUrl?: string;
+  channelId: string; // 'community' OR 'userA_userB'
+  createdAt: any; // Firestore Timestamp or ISO string
 }
