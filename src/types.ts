@@ -8,16 +8,16 @@ export interface User {
   id: string;
   name: string;
   email: string;
-  password?: string; // Added for persistence/login check
-  whatsapp?: string; // Added for registration
+  password?: string; // Kept for legacy typing, but Firebase Auth handles this
+  whatsapp?: string; 
   role: UserRole;
   avatar?: string;
-  subscriptionDueDate?: string; // ISO Date string YYYY-MM-DD
-  allowedSuppliers?: string[]; // List of Supplier IDs this user can see
-  allowedCourses?: string[]; // List of Course IDs this user can see
+  subscriptionDueDate?: string; 
+  allowedSuppliers?: string[]; 
+  allowedCourses?: string[]; 
   permissions: {
-    suppliers: boolean; // Legacy/Global toggle (can be used as master switch)
-    courses: boolean;   // Legacy/Global toggle
+    suppliers: boolean; 
+    courses: boolean;   
   };
 }
 
@@ -43,13 +43,13 @@ export interface Comment {
 
 export interface Offer {
   id: string;
-  supplierId?: string; // Link to registered supplier
+  supplierId?: string; 
   supplierName: string;
-  productName?: string; // New field for highlighted product name
+  productName?: string; 
   description: string;
-  mediaUrl: string; // Image or Video placeholder
+  mediaUrl: string; 
   price?: string;
-  likes: number; // Represents Heat now
+  likes: number; 
   comments: Comment[];
   whatsapp: string;
   category: string;
@@ -60,15 +60,15 @@ export interface Supplier {
   id: string;
   name: string;
   category: string;
-  city?: string; // New field for location filtering
+  city?: string; 
   imageUrl: string;
   rating: number;
   isVerified: boolean;
   whatsapp: string;
   bio: string;
   address?: string; 
-  mapsUrl?: string; // Specific Google Maps Link
-  cnpj?: string; // Optional CNPJ
+  mapsUrl?: string; 
+  cnpj?: string; 
   images: string[];
 }
 
@@ -79,7 +79,7 @@ export interface VipProduct {
   price: string;
   imageUrl: string;
   stock: number;
-  isLocked: boolean; // Requires VIP subscription
+  isLocked: boolean; 
 }
 
 export interface Course {
@@ -100,7 +100,7 @@ export interface CourseModule {
 export interface Lesson {
   id: string;
   title: string;
-  videoUrl: string; // Placeholder
+  videoUrl: string; 
   content: string;
   completed: boolean;
 }
@@ -108,11 +108,11 @@ export interface Lesson {
 export interface ChatMessage {
   id: string;
   senderId: string;
-  senderName: string; // Added for community chat
-  senderAvatar?: string; // Added for community chat
+  senderName: string; 
+  senderAvatar?: string; 
   text: string;
-  imageUrl?: string; // Added for image support
+  imageUrl?: string; 
   timestamp: string;
-  isMine: boolean;
-  channelId?: string; // 'support' or 'community'
+  isMine?: boolean; // Optional because derived at runtime
+  channelId?: string; 
 }

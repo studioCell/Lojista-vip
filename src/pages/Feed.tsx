@@ -21,11 +21,9 @@ const OfferCard: React.FC<{ offer: Offer }> = ({ offer }) => {
     }
   };
 
-  // Heat Calculation (Max 50 for full red bar)
   const heatLevel = Math.min(offer.likes, 50);
   const heatPercentage = (heatLevel / 50) * 100;
   
-  // Color Transition for Thermometer
   const getThermometerColor = () => {
       if (heatPercentage < 33) return 'from-yellow-500 to-yellow-600';
       if (heatPercentage < 66) return 'from-orange-400 to-orange-600';
@@ -37,7 +35,6 @@ const OfferCard: React.FC<{ offer: Offer }> = ({ offer }) => {
       <div className="p-4 flex items-center justify-between">
         <div className="flex items-center space-x-3">
           <div className="w-10 h-10 rounded-full bg-yellow-500 flex items-center justify-center text-black font-bold text-lg overflow-hidden border-2 border-yellow-300">
-             {/* If supplier has an image, try to match it, otherwise initial */}
              {offer.supplierName[0]}
           </div>
           <div>
@@ -54,8 +51,6 @@ const OfferCard: React.FC<{ offer: Offer }> = ({ offer }) => {
 
       <div className="relative aspect-video bg-gray-800 group">
         <img src={offer.mediaUrl} alt="Offer" className="w-full h-full object-cover" />
-        
-        {/* Thermometer Overlay */}
         <div className="absolute bottom-0 left-0 right-0 h-1.5 bg-gray-800/80">
             <div 
                 className={`h-full bg-gradient-to-r ${getThermometerColor()} transition-all duration-500 ease-out`} 
@@ -65,14 +60,12 @@ const OfferCard: React.FC<{ offer: Offer }> = ({ offer }) => {
       </div>
 
       <div className="p-4">
-         {/* Product Title Highlight */}
          {offer.productName && (
              <h2 className="text-xl font-extrabold text-white mb-1 uppercase tracking-tight">
                  {offer.productName}
              </h2>
          )}
 
-        {/* Action Buttons */}
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center space-x-6">
             <button 
@@ -100,7 +93,6 @@ const OfferCard: React.FC<{ offer: Offer }> = ({ offer }) => {
           {offer.description}
         </p>
 
-        {/* Highlighted Footer for Supplier & Price */}
         <div className="bg-gray-800/50 rounded-lg p-3 border border-gray-700 flex items-center justify-between mt-4">
             <div className="flex flex-col">
                 <div className="flex items-center gap-2 text-xs text-gray-400 mb-1">
@@ -120,7 +112,6 @@ const OfferCard: React.FC<{ offer: Offer }> = ({ offer }) => {
             </button>
         </div>
         
-        {/* Comments Section */}
         {showComments && (
             <div className="mt-4 pt-4 border-t border-gray-800 animate-fade-in">
                 <div className="space-y-3 mb-4 max-h-40 overflow-y-auto custom-scrollbar">
@@ -167,18 +158,15 @@ const Feed: React.FC = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const storyInputRef = useRef<HTMLInputElement>(null);
 
-  // Story Viewer State
   const [viewingStoryIndex, setViewingStoryIndex] = useState<number | null>(null);
   const [progress, setProgress] = useState(0);
   const touchStartX = useRef<number>(0);
   const touchEndX = useRef<number>(0);
 
-  // Search State
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<string[]>([]);
   const [currentResultIndex, setCurrentResultIndex] = useState(0);
 
-  // Form State
   const [productName, setProductName] = useState('');
   const [desc, setDesc] = useState('');
   const [price, setPrice] = useState('');
@@ -187,21 +175,28 @@ const Feed: React.FC = () => {
   const [supplierName, setSupplierName] = useState('');
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
 
-  // --- SEARCH LOGIC ---
+  // Convert File to Base64 (for Firestore storage without Storage Bucket)
+  const fileToBase64 = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.readAsDataURL(file);
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = error => reject(error);
+    });
+  };
+
   useEffect(() => {
     if (!searchQuery.trim()) {
         setSearchResults([]);
         setCurrentResultIndex(0);
         return;
     }
-    // Filter offers where product name includes query
     const results = offers
         .filter(o => o.productName?.toLowerCase().includes(searchQuery.toLowerCase()))
         .map(o => o.id);
     setSearchResults(results);
     setCurrentResultIndex(0);
     
-    // Auto scroll to first result
     if (results.length > 0) {
         scrollToOffer(results[0]);
     }
@@ -221,26 +216,25 @@ const Feed: React.FC = () => {
       scrollToOffer(searchResults[prevIndex]);
   };
 
-  const handleStoryUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleStoryUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-        const url = URL.createObjectURL(file);
+        // We use Base64 for images in Firestore to avoid bucket complexity for user
+        const url = await fileToBase64(file);
         const type = file.type.startsWith('video') ? 'video' : 'image';
         addStory(url, type);
-        alert('Status adicionado!');
+        alert('Status adicionado! Pode levar alguns segundos para aparecer.');
     }
   };
 
-  // --- STORY VIEWER LOGIC ---
   const currentStory = viewingStoryIndex !== null ? stories[viewingStoryIndex] : null;
 
   useEffect(() => {
     let interval: ReturnType<typeof setInterval>;
     if (currentStory) {
         setProgress(0);
-        // If it's a video, we wait for onEnded. If image, we set timer.
         if (currentStory.mediaType === 'image') {
-            const duration = 5000; // 5 seconds
+            const duration = 5000; 
             const step = 100;
             interval = setInterval(() => {
                 setProgress(prev => {
@@ -261,7 +255,7 @@ const Feed: React.FC = () => {
           if (viewingStoryIndex < stories.length - 1) {
               setViewingStoryIndex(viewingStoryIndex + 1);
           } else {
-              setViewingStoryIndex(null); // Close on end
+              setViewingStoryIndex(null); 
           }
       }
   };
@@ -271,13 +265,11 @@ const Feed: React.FC = () => {
           if (viewingStoryIndex > 0) {
               setViewingStoryIndex(viewingStoryIndex - 1);
           } else {
-              // Restart current or close? Let's just reset progress
               setProgress(0);
           }
       }
   };
 
-  // Swipe Handlers
   const handleTouchStart = (e: React.TouchEvent) => {
       touchStartX.current = e.targetTouches[0].clientX;
   };
@@ -288,20 +280,17 @@ const Feed: React.FC = () => {
 
   const handleTouchEnd = () => {
       if (touchStartX.current - touchEndX.current > 75) {
-          // Swiped Left -> Next
           handleNextStory();
       }
       if (touchStartX.current - touchEndX.current < -75) {
-          // Swiped Right -> Prev
           handlePrevStory();
       }
   };
 
-
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      const url = URL.createObjectURL(file);
+      const url = await fileToBase64(file);
       setPreviewUrl(url);
     }
   };
@@ -322,8 +311,10 @@ const Feed: React.FC = () => {
 
   const handlePublish = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!previewUrl && !desc) return;
+
     addOffer({
-      id: Date.now().toString(),
+      id: '', // Generated by Firestore
       supplierName: supplierName || user?.name || 'Admin',
       productName: productName,
       description: desc,
@@ -333,7 +324,7 @@ const Feed: React.FC = () => {
       comments: [],
       whatsapp: whatsapp || '5511999999999',
       category: category || 'Geral',
-      timestamp: 'Agora mesmo'
+      timestamp: new Date().toLocaleTimeString() // Temporary display
     });
     setIsModalOpen(false);
     setProductName('');
@@ -345,13 +336,10 @@ const Feed: React.FC = () => {
     setPreviewUrl(null);
   };
 
-  // Scroll to offer function
   const scrollToOffer = (offerId: string) => {
       const element = document.getElementById(`offer-${offerId}`);
       if (element) {
-          // Use scrollIntoView with center block to handle sticky headers better
           element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          // Optional: Add highlight flash effect
           element.classList.add('border-yellow-500');
           setTimeout(() => element.classList.remove('border-yellow-500'), 2000);
       }
@@ -373,9 +361,7 @@ const Feed: React.FC = () => {
         )}
       </div>
 
-      {/* Stories / Status Updates */}
       <div className="flex space-x-4 overflow-x-auto pb-4 mb-2 no-scrollbar">
-        {/* User's own story ADD */}
         <div className="flex flex-col items-center space-y-1 min-w-[70px]">
              <div 
                 className="w-16 h-16 rounded-full p-[2px] bg-gray-700 border-2 border-dark flex items-center justify-center relative cursor-pointer hover:border-gray-500 transition"
@@ -389,14 +375,13 @@ const Feed: React.FC = () => {
                     type="file" 
                     hidden 
                     ref={storyInputRef} 
-                    accept="video/*,image/*"
+                    accept="image/*"
                     onChange={handleStoryUpload}
                  />
              </div>
              <span className="text-[10px] text-gray-400">Seu Status</span>
         </div>
 
-        {/* User Stories (Instagram Style - Gradient) */}
         {stories.map((story, index) => (
              <div key={story.id} className="flex flex-col items-center space-y-1 min-w-[70px]">
                 <div 
@@ -415,7 +400,6 @@ const Feed: React.FC = () => {
             </div>
         ))}
 
-        {/* Admin Offers Stories (Yellow Ring) */}
         {offers.slice(0, 5).map((offer) => (
           <div key={offer.id} className="flex flex-col items-center space-y-1 min-w-[70px]">
             <div 
@@ -431,7 +415,6 @@ const Feed: React.FC = () => {
         ))}
       </div>
 
-      {/* Search Bar - Smart Search below Stories */}
       <div className="mb-6 relative z-20">
           <div className="relative">
               <Search className="absolute left-3 top-3 text-gray-400" size={18} />
@@ -443,7 +426,6 @@ const Feed: React.FC = () => {
                   onChange={e => setSearchQuery(e.target.value)}
               />
               
-              {/* Navigation Arrows if matches found */}
               {searchResults.length > 0 && (
                   <div className="absolute right-2 top-1.5 flex bg-gray-700 rounded-lg p-0.5">
                       <button 
@@ -466,19 +448,17 @@ const Feed: React.FC = () => {
           </div>
       </div>
 
-      {/* Feed */}
       <div className="space-y-6">
         {offers.map(offer => (
           <OfferCard key={offer.id} offer={offer} />
         ))}
         {offers.length === 0 && (
           <div className="text-center py-20 text-gray-500">
-            Nenhuma oferta disponível no momento.
+            Aguardando ofertas...
           </div>
         )}
       </div>
 
-      {/* FULL SCREEN STORY VIEWER OVERLAY */}
       {viewingStoryIndex !== null && currentStory && (
           <div 
             className="fixed inset-0 z-50 bg-black flex flex-col items-center justify-center"
@@ -486,7 +466,6 @@ const Feed: React.FC = () => {
             onTouchMove={handleTouchMove}
             onTouchEnd={handleTouchEnd}
           >
-              {/* Progress Bar */}
               <div className="flex space-x-1 p-2 pt-4 absolute top-0 left-0 right-0 z-20 w-full max-w-md mx-auto">
                   {stories.map((_, idx) => (
                       <div key={idx} className="h-1 bg-gray-600 rounded-full flex-1 overflow-hidden">
@@ -496,16 +475,14 @@ const Feed: React.FC = () => {
                   ))}
               </div>
 
-              {/* Header Info */}
               <div className="absolute top-8 left-4 z-20 flex items-center space-x-3 w-full max-w-md mx-auto">
                   <img src={currentStory.userAvatar} className="w-10 h-10 rounded-full border border-gray-500" />
                   <div>
                       <p className="text-white font-bold text-sm shadow-black drop-shadow-md">{currentStory.userName}</p>
-                      <p className="text-xs text-gray-300 shadow-black drop-shadow-md">{currentStory.timestamp}</p>
+                      <p className="text-xs text-gray-300 shadow-black drop-shadow-md">{new Date(currentStory.timestamp).toLocaleTimeString()}</p>
                   </div>
               </div>
 
-              {/* Close Button */}
               <button 
                   onClick={() => setViewingStoryIndex(null)}
                   className="absolute top-8 right-4 z-30 text-white p-2 rounded-full bg-black/20"
@@ -513,11 +490,9 @@ const Feed: React.FC = () => {
                   <X size={24} />
               </button>
 
-              {/* Navigation Hit Areas (Invisible) */}
               <div className="absolute inset-y-0 left-0 w-1/4 z-10" onClick={handlePrevStory}></div>
               <div className="absolute inset-y-0 right-0 w-1/4 z-10" onClick={handleNextStory}></div>
 
-              {/* Main Media Container with 9:16 Aspect Ratio */}
               <div className="relative w-full h-full max-w-md flex items-center justify-center bg-black">
                   <div className="w-full aspect-[9/16] relative bg-gray-900 overflow-hidden flex items-center justify-center">
                     {currentStory.mediaType === 'video' ? (
@@ -534,7 +509,6 @@ const Feed: React.FC = () => {
                   </div>
               </div>
 
-              {/* Footer Interaction (Optional) */}
               <div className="absolute bottom-4 left-0 right-0 p-4 z-20 flex items-center space-x-3 w-full max-w-md mx-auto">
                    <input type="text" placeholder="Responder story..." className="flex-1 bg-transparent border border-white/50 rounded-full px-4 py-2 text-white placeholder-white/70 focus:outline-none" />
                    <button className="text-white"><Send size={24} /></button>
@@ -542,7 +516,6 @@ const Feed: React.FC = () => {
           </div>
       )}
 
-      {/* Modal - Create Offer */}
       {isModalOpen && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-dark-surface border border-gray-800 rounded-2xl w-full max-w-md p-6 relative animate-fade-in max-h-[90vh] overflow-y-auto">
@@ -557,7 +530,6 @@ const Feed: React.FC = () => {
             
             <form onSubmit={handlePublish} className="space-y-4">
               
-              {/* Supplier Select */}
               <div>
                   <label className="text-xs text-gray-400 ml-1">Selecionar Fornecedor</label>
                   <select 
@@ -601,7 +573,6 @@ const Feed: React.FC = () => {
                 )}
               </div>
 
-              {/* Product Name Input */}
               <div>
                 <label className="text-xs text-gray-400 ml-1">Nome do Produto (Destaque)</label>
                 <div className="relative">
