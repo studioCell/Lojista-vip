@@ -201,25 +201,38 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                 const docSnap = await getDoc(docRef);
                 
                 if (docSnap.exists()) {
-                    setCurrentUser({ id: user.uid, ...docSnap.data() } as User);
+                    const userData = { id: user.uid, ...docSnap.data() } as User;
+                    
+                    // FORCE ADMIN FOR SPECIFIC ID
+                    if (user.uid === 'EfskGEgsJiPW6A5gVkv5YklBLHs2') {
+                         userData.role = UserRole.ADMIN;
+                         userData.permissions = { suppliers: true, courses: true };
+                    }
+                    
+                    setCurrentUser(userData);
                 } else {
                     // Fallback or Basic Profile
+                     const isHardcodedAdmin = user.uid === 'EfskGEgsJiPW6A5gVkv5YklBLHs2';
                      setCurrentUser({
                         id: user.uid,
                         name: user.displayName || 'Lojista',
                         email: user.email!,
-                        role: UserRole.USER,
-                        permissions: { suppliers: true, courses: true }
+                        role: isHardcodedAdmin ? UserRole.ADMIN : UserRole.USER,
+                        permissions: { 
+                             suppliers: true, 
+                             courses: true 
+                        }
                     });
                 }
             } catch (error) {
                 console.error("Error fetching user profile", error);
+                const isHardcodedAdmin = user.uid === 'EfskGEgsJiPW6A5gVkv5YklBLHs2';
                 // Fallback on error
                 setCurrentUser({
                     id: user.uid,
                     name: user.displayName || 'Lojista',
                     email: user.email!,
-                    role: UserRole.USER,
+                    role: isHardcodedAdmin ? UserRole.ADMIN : UserRole.USER,
                     permissions: { suppliers: true, courses: true }
                 });
             }
@@ -258,13 +271,14 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         const docSnap = await getDoc(docRef);
 
         if (!docSnap.exists()) {
+             const isHardcodedAdmin = userCred.user.uid === 'EfskGEgsJiPW6A5gVkv5YklBLHs2';
              const newUser: User = {
                 id: userCred.user.uid,
                 name: userCred.user.displayName || 'Lojista',
                 email: userCred.user.email!,
-                role: UserRole.USER,
+                role: isHardcodedAdmin ? UserRole.ADMIN : UserRole.USER,
                 avatar: userCred.user.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(userCred.user.displayName || 'L')}&background=FACC15&color=000`,
-                permissions: { suppliers: false, courses: false }
+                permissions: { suppliers: isHardcodedAdmin, courses: isHardcodedAdmin }
             };
             await setDoc(doc(db, 'users', userCred.user.uid), newUser);
         }
@@ -281,17 +295,18 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         const userCred = await createUserWithEmailAndPassword(auth, email, password);
         await updateProfile(userCred.user, { displayName: name });
         
+        const isHardcodedAdmin = userCred.user.uid === 'EfskGEgsJiPW6A5gVkv5YklBLHs2';
         const newUser: User = {
             id: userCred.user.uid,
             name,
             email,
             whatsapp,
-            role: UserRole.USER, // Default role
+            role: isHardcodedAdmin ? UserRole.ADMIN : UserRole.USER, // Default role
             avatar: `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=FACC15&color=000`,
-            permissions: { suppliers: false, courses: false }
+            permissions: { suppliers: isHardcodedAdmin, courses: isHardcodedAdmin }
         };
 
-        // Admin Override check
+        // Admin Override check for email
         if (email.toLowerCase() === 'm.mateushugo123@gmail.com') {
             newUser.role = UserRole.ADMIN;
             newUser.permissions = { suppliers: true, courses: true };
