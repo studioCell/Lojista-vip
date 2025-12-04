@@ -1,24 +1,25 @@
+
 import { initializeApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
+import { getAnalytics } from "firebase/analytics";
 
-// ------------------------------------------------------------------
-// ATENÇÃO: COLE AQUI A CONFIGURAÇÃO WEB DO SEU PROJETO FIREBASE
-// Vá em: Console Firebase > Configurações do Projeto > Seus Aplicativos > Web (</>)
-// ------------------------------------------------------------------
-
+// Configuração do Firebase fornecida
 const firebaseConfig = {
-  apiKey: "SUA_API_KEY_AQUI",
+  apiKey: "AIzaSyCWD4oVVXQjkx4S5GyUceYZEC9gXOm-dys",
   authDomain: "lojista-vip.firebaseapp.com",
   projectId: "lojista-vip",
-  storageBucket: "lojista-vip.appspot.com",
-  messagingSenderId: "SEU_MESSAGING_SENDER_ID",
-  appId: "SEU_APP_ID"
+  storageBucket: "lojista-vip.firebasestorage.app",
+  messagingSenderId: "136672504878",
+  appId: "1:136672504878:web:9cb15b423ff309dac643bf",
+  measurementId: "G-JVEXTZDZP8"
 };
 
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
+const analytics = getAnalytics(app);
 
-// Exports
+// Exportar os serviços para serem usados no restante do app
 export const auth = getAuth(app);
 export const db = getFirestore(app);
+export { analytics };
