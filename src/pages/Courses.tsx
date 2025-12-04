@@ -20,19 +20,10 @@ const Courses: React.FC = () => {
 
   const allowedCourseIds = user?.allowedCourses || [];
   
-  // Admin sees all. Users see only what is allowed.
-  // HOWEVER: The prompt implies users can SEE the cover but not access. 
-  // But for the "Choose which course to release" feature to make sense, maybe we should hide the others?
-  // Let's Stick to the previous "Show all but Lock" logic, BUT prioritize the Specific Access List.
-  // If a user has NO access to a course, it shows locked. If they have access ID, it shows unlocked.
-  
-  // Wait, if the requirement is "Choose the course I will release", that implies filtering access.
-  // If I only release Course A, Course B should be Locked.
-  
   const handleCreateCourse = (e: React.FormEvent) => {
     e.preventDefault();
     addCourse({
-      id: Date.now().toString(),
+      id: Date.now().toString(), // Context will overwrite with Firebase ID if needed or use this
       title: title,
       description: desc,
       imageUrl: `https://picsum.photos/600/300?random=${Date.now()}`,
@@ -44,7 +35,6 @@ const Courses: React.FC = () => {
     setDesc('');
   };
 
-  // If expired completely, block the whole page like Suppliers?
   if (user && user.role !== UserRole.ADMIN && (!hasPlan || isExpired)) {
       return (
           <div className="h-[calc(100vh-100px)] flex flex-col items-center justify-center text-center p-8 animate-fade-in">

@@ -8,7 +8,7 @@ export const MOCK_ADMIN: User = {
   role: UserRole.ADMIN,
   avatar: 'https://picsum.photos/100/100',
   subscriptionDueDate: '2030-12-31',
-  allowedSuppliers: [], // Admin sees all by default logic
+  allowedSuppliers: [], 
   allowedCourses: [],
   permissions: {
     suppliers: true,
@@ -22,7 +22,7 @@ export const MOCK_USER: User = {
   email: 'user@lojista.vip',
   role: UserRole.USER,
   avatar: 'https://picsum.photos/100/100',
-  subscriptionDueDate: '', // Not set
+  subscriptionDueDate: '', 
   allowedSuppliers: [],
   allowedCourses: [],
   permissions: {
@@ -33,70 +33,11 @@ export const MOCK_USER: User = {
 
 export const MOCK_USERS_LIST: User[] = [
   MOCK_ADMIN,
-  MOCK_USER,
-  {
-    id: 'u2',
-    name: 'Carla Modas',
-    email: 'carla@loja.com',
-    role: UserRole.USER,
-    avatar: 'https://picsum.photos/100/100?random=50',
-    subscriptionDueDate: '2024-12-31',
-    allowedSuppliers: ['s1'],
-    allowedCourses: ['c1'],
-    permissions: { suppliers: true, courses: true }
-  },
-  {
-    id: 'u3',
-    name: 'João Multimarcas',
-    email: 'joao@store.com',
-    role: UserRole.USER,
-    avatar: 'https://picsum.photos/100/100?random=51',
-    subscriptionDueDate: '2023-01-01', // Expired
-    allowedSuppliers: [],
-    allowedCourses: [],
-    permissions: { suppliers: false, courses: true }
-  },
-  {
-    id: 'u4',
-    name: 'Ana Boutique',
-    email: 'ana@boutique.com',
-    role: UserRole.USER,
-    avatar: 'https://picsum.photos/100/100?random=52',
-    subscriptionDueDate: '',
-    allowedSuppliers: [],
-    allowedCourses: [],
-    permissions: { suppliers: false, courses: false }
-  }
+  MOCK_USER
 ];
 
-export const INITIAL_OFFERS: Offer[] = [
-  {
-    id: 'o1',
-    supplierName: 'Atacado Moda Sul',
-    productName: 'Casaco de Lã Batida',
-    description: 'Nova coleção de Inverno chegando com tudo! Casacos de lã batida direto da fábrica.',
-    mediaUrl: 'https://picsum.photos/600/400?random=1',
-    price: 'R$ 89,90',
-    likes: 45,
-    comments: [],
-    whatsapp: '5511999999999',
-    category: 'Roupas',
-    timestamp: '2h atrás'
-  },
-  {
-    id: 'o2',
-    supplierName: 'Eletrônicos ChinaImp',
-    productName: 'Smartwatch Ultra Series 9',
-    description: 'Lote exclusivo para revenda. Alta margem de lucro! Acompanha pulseira extra.',
-    mediaUrl: 'https://picsum.photos/600/400?random=2',
-    price: 'R$ 45,00',
-    likes: 12,
-    comments: [],
-    whatsapp: '5511988888888',
-    category: 'Eletrônicos',
-    timestamp: '5h atrás'
-  }
-];
+// Cleaned up Offers
+export const INITIAL_OFFERS: Offer[] = [];
 
 export const INITIAL_SUPPLIERS: Supplier[] = [
   {

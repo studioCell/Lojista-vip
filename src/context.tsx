@@ -1,7 +1,7 @@
 
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { User, Offer, Supplier, VipProduct, Course, CourseModule, Lesson, ChatMessage, UserRole, Story, Comment } from './types';
-import { INITIAL_OFFERS, INITIAL_VIP_PRODUCTS, INITIAL_COURSES, INITIAL_SUPPLIERS, MOCK_USERS_LIST } from './mockData';
+import { INITIAL_OFFERS, INITIAL_VIP_PRODUCTS, INITIAL_COURSES, INITIAL_SUPPLIERS } from './mockData';
 import { auth, db } from './firebase';
 import { 
     signInWithEmailAndPassword, 
@@ -26,7 +26,7 @@ import {
   orderBy,
   onSnapshot,
   increment,
-  writeBatch
+  Unsubscribe
 } from 'firebase/firestore';
 
 // --- Types & Context Definition ---
@@ -97,45 +97,63 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   
   const [onlineCount, setOnlineCount] = useState(24);
 
-  // --- 1. AUTHENTICATION LISTENER ---
+  // --- 1. AUTHENTICATION & CURRENT USER LISTENER ---
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (user: FirebaseUser | null) => {
-        if (user) {
-            try {
-                const docRef = doc(db, 'users', user.uid);
-                const docSnap = await getDoc(docRef);
-                
+    let userUnsub: Unsubscribe | null = null;
+
+    const authUnsub = onAuthStateChanged(auth, async (firebaseUser: FirebaseUser | null) => {
+        if (firebaseUser) {
+            // Setup Real-time listener for the User Profile
+            // This ensures if Admin updates permissions, the user sees it INSTANTLY.
+            const userRef = doc(db, 'users', firebaseUser.uid);
+            
+            userUnsub = onSnapshot(userRef, (docSnap) => {
                 if (docSnap.exists()) {
-                    const userData = { id: user.uid, ...docSnap.data() } as User;
-                    // FORCE ADMIN
-                    if (user.uid === 'EfskGEgsJiPW6A5gVkv5YklBLHs2') {
+                    const userData = { id: firebaseUser.uid, ...docSnap.data() } as User;
+                    
+                    // Force Admin Role for specific email
+                    if (firebaseUser.email === 'm.mateushugo123@gmail.com') {
                          userData.role = UserRole.ADMIN;
                          userData.permissions = { suppliers: true, courses: true };
                     }
                     setCurrentUser(userData);
                 } else {
-                     // Fallback creation if not in DB yet
-                     const isHardcodedAdmin = user.uid === 'EfskGEgsJiPW6A5gVkv5YklBLHs2';
+                     // Create DB entry if it doesn't exist (fallback)
+                     const isHardcodedAdmin = firebaseUser.email === 'm.mateushugo123@gmail.com';
                      const newUser: User = {
-                        id: user.uid,
-                        name: user.displayName || 'Lojista',
-                        email: user.email!,
+                        id: firebaseUser.uid,
+                        name: firebaseUser.displayName || 'Lojista',
+                        email: firebaseUser.email!,
                         role: isHardcodedAdmin ? UserRole.ADMIN : UserRole.USER,
-                        avatar: user.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(user.displayName || 'L')}&background=FACC15&color=000`,
-                        permissions: { suppliers: true, courses: true }
+                        avatar: firebaseUser.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(firebaseUser.displayName || 'L')}&background=FACC15&color=000`,
+                        permissions: { suppliers: isHardcodedAdmin, courses: isHardcodedAdmin },
+                        subscriptionDueDate: '',
+                        allowedSuppliers: [],
+                        allowedCourses: []
                     };
-                    await setDoc(doc(db, 'users', user.uid), newUser);
+                    setDoc(doc(db, 'users', firebaseUser.uid), newUser);
                     setCurrentUser(newUser);
                 }
-            } catch (error) {
-                console.error("Auth Error", error);
-            }
+                setIsLoading(false);
+            }, (error) => {
+                console.error("User Snapshot Error:", error);
+                setIsLoading(false);
+            });
+
         } else {
             setCurrentUser(null);
+            setIsLoading(false);
+            if (userUnsub) {
+                userUnsub();
+                userUnsub = null;
+            }
         }
-        setIsLoading(false);
     });
-    return unsubscribe;
+
+    return () => {
+        authUnsub();
+        if (userUnsub) userUnsub();
+    };
   }, []);
 
   // --- 2. DATA LISTENERS (REAL-TIME DATABASE) ---
@@ -151,7 +169,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   // Sync Offers
   useEffect(() => {
-      const q = query(collection(db, 'offers'), orderBy('timestamp', 'desc')); // Assuming ISO string works for order, or use createdAt
+      const q = query(collection(db, 'offers'), orderBy('createdAt', 'desc')); 
       const unsub = onSnapshot(q, (snap) => {
           setOffers(snap.docs.map(d => ({ id: d.id, ...d.data() } as Offer)));
       });
@@ -164,10 +182,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       const unsub = onSnapshot(q, (snap) => {
           const list = snap.docs.map(d => ({ id: d.id, ...d.data() } as Supplier));
           setSuppliers(list);
-          
-          // SEEDING: If empty, populate with Mock Data
+          // If empty and not loading, seed
           if (list.length === 0 && !isLoading) {
-             // seedSuppliers(); // Call explicitly or handle elsewhere
+             // Optional: seedSuppliers();
           }
       });
       return () => unsub();
@@ -180,7 +197,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       return () => unsub();
   }, []);
 
-  // Sync Courses
+  // Sync Courses (Real-time updates for everyone)
   useEffect(() => {
       const q = query(collection(db, 'courses'));
       const unsub = onSnapshot(q, (snap) => setCourses(snap.docs.map(d => ({ id: d.id, ...d.data() } as Course))));
@@ -196,7 +213,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   // Sync Messages
   useEffect(() => {
-      const q = query(collection(db, 'messages'), orderBy('timestamp', 'asc')); // Oldest first for chat log
+      const q = query(collection(db, 'messages'), orderBy('createdAt', 'asc')); 
       const unsub = onSnapshot(q, (snap) => {
           const allMsgs = snap.docs.map(d => ({ id: d.id, ...d.data() } as ChatMessage));
           setCommunityMessages(allMsgs.filter(m => m.channelId === 'community'));
@@ -205,27 +222,13 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       return () => unsub();
   }, []);
 
-  // --- 3. SEEDING FUNCTION (Auto-populate DB if empty) ---
+  // --- 3. SEEDING FUNCTION ---
   useEffect(() => {
-      const seedDatabase = async () => {
-          // Only seed if logged in as Admin to prevent spam, or check if completely empty
-          // For this demo, we check if collections are empty regardless of user
-          
-          // Seed Suppliers
-          if (suppliers.length === 0 && !dataLoading) {
-             // We can trigger this manually, or let it happen. 
-             // To prevent infinite loops or double writes, we check snapshot size in a transaction or just simple check
-          }
-      };
-      
-      // Simple timeout to allow firestore to connect before deciding it's empty
       const timer = setTimeout(() => {
           setDataLoading(false);
+          // Only seed if empty.
           if (suppliers.length === 0) {
              INITIAL_SUPPLIERS.forEach(s => setDoc(doc(db, 'suppliers', s.id), s));
-          }
-          if (offers.length === 0) {
-             INITIAL_OFFERS.forEach(o => setDoc(doc(db, 'offers', o.id), o));
           }
           if (courses.length === 0) {
              INITIAL_COURSES.forEach(c => setDoc(doc(db, 'courses', c.id), c));
@@ -234,9 +237,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
              INITIAL_VIP_PRODUCTS.forEach(p => setDoc(doc(db, 'vip_products', p.id), p));
           }
       }, 3000);
-      
       return () => clearTimeout(timer);
-  }, []); // Run once on mount
+  }, []); 
 
   // Simulate Online Count
   useEffect(() => {
@@ -264,7 +266,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     setIsLoading(true);
     const provider = new GoogleAuthProvider();
     await signInWithPopup(auth, provider);
-    // User creation handled in onAuthStateChanged
   };
 
   const register = async (name: string, email: string, password: string, whatsapp: string) => {
@@ -273,7 +274,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         const userCred = await createUserWithEmailAndPassword(auth, email, password);
         await updateProfile(userCred.user, { displayName: name });
         
-        const isHardcodedAdmin = userCred.user.uid === 'EfskGEgsJiPW6A5gVkv5YklBLHs2';
+        const isHardcodedAdmin = email.toLowerCase() === 'm.mateushugo123@gmail.com';
         const newUser: User = {
             id: userCred.user.uid,
             name,
@@ -281,13 +282,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             whatsapp,
             role: isHardcodedAdmin ? UserRole.ADMIN : UserRole.USER,
             avatar: `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=FACC15&color=000`,
-            permissions: { suppliers: isHardcodedAdmin, courses: isHardcodedAdmin }
+            permissions: { suppliers: isHardcodedAdmin, courses: isHardcodedAdmin },
+            subscriptionDueDate: '',
+            allowedSuppliers: [],
+            allowedCourses: []
         };
-
-        if (email.toLowerCase() === 'm.mateushugo123@gmail.com') {
-            newUser.role = UserRole.ADMIN;
-            newUser.permissions = { suppliers: true, courses: true };
-        }
 
         await setDoc(doc(db, 'users', userCred.user.uid), newUser);
       } catch (error) {
@@ -326,15 +325,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   // OFFERS
   const addOffer = async (offer: Offer) => {
-      // Create a clean object without undefined values for Firestore
       const cleanOffer = JSON.parse(JSON.stringify(offer));
-      delete cleanOffer.id; // Let firestore gen ID if not provided, or use setDoc if ID provided
+      delete cleanOffer.id; 
+      cleanOffer.createdAt = new Date().toISOString(); // sort key
       
-      if (offer.id) {
-          await setDoc(doc(db, 'offers', offer.id), cleanOffer);
-      } else {
-          await addDoc(collection(db, 'offers'), cleanOffer);
-      }
+      await addDoc(collection(db, 'offers'), cleanOffer);
   };
 
   const deleteOffer = async (id: string) => {
@@ -355,7 +350,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           userName: currentUser.name,
           userAvatar: currentUser.avatar || '',
           text,
-          timestamp: 'Agora' // Or use ISO string
+          timestamp: 'Agora' 
       };
       await updateDoc(doc(db, 'offers', offerId), {
           comments: arrayUnion(newComment)
@@ -384,8 +379,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       await setDoc(doc(db, 'courses', course.id), clean);
   };
 
-  // Handling deep nested arrays in Firestore is tricky. 
-  // Strategy: Read the course, modify in memory, write back entire modules array.
   const addModule = async (courseId: string, title: string) => {
       const courseRef = doc(db, 'courses', courseId);
       const courseSnap = await getDoc(courseRef);
@@ -461,7 +454,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const sendCommunityMessage = async (text: string, imageUrl?: string) => {
       if (!currentUser) return;
       const newMsg: ChatMessage = {
-          id: Date.now().toString(), // Will be overwritten by firestore ID but needed for type
+          id: Date.now().toString(),
           senderId: currentUser.id,
           senderName: currentUser.name,
           senderAvatar: currentUser.avatar,
@@ -471,7 +464,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           channelId: 'community'
       };
       
-      // We don't save 'isMine' in DB, it's calculated on read
       const { isMine, id, ...msgData } = newMsg; 
       await addDoc(collection(db, 'messages'), { ...msgData, createdAt: new Date().toISOString() });
   };
@@ -493,7 +485,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       await addDoc(collection(db, 'messages'), { ...msgData, createdAt: new Date().toISOString() });
   };
 
-  // Transform messages for UI (calculate isMine)
+  // Transform messages for UI (calculate isMine dynamically based on currentUser)
   const uiCommunityMessages = communityMessages.map(m => ({
       ...m,
       isMine: currentUser ? m.senderId === currentUser.id : false

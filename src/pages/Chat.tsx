@@ -25,19 +25,28 @@ const Chat: React.FC = () => {
   // For Admin: Get list of users who have messaged support
   const supportUsers = React.useMemo(() => {
      const users = new Map();
-     // Combine private messages to find unique conversations
+     // We filter private messages to find unique conversation partners
      privateMessages.forEach(msg => {
-        // If msg channelId exists, it tracks the user conversation
-        if (msg.channelId) {
-            // Logic: Channel ID maps to the USER ID of the non-admin participant
+        // The channelId in Private Messages logic represents the USER ID of the conversation
+        // If User A sends msg, channelId = 'A'.
+        // If Admin replies to A, channelId = 'A'.
+        if (msg.channelId && msg.channelId !== 'community') {
             const isMe = msg.senderId === user?.id;
             
-            // Just use the channelId (which is the userId) as the key
+            // Key is the channel ID (the user's ID)
             if(!users.has(msg.channelId)) {
+                // If I am admin, I want to see the User's name/avatar, not mine.
+                // If msg was sent by user, take sender info. If sent by admin (me), I need to infer or it's a reply.
+                // Simplified: We assume the channelId IS the userId we are talking to.
+                
+                // Fallback name if we only have admin messages in a channel (rare)
+                const displayName = (!isMe) ? msg.senderName : 'Usuário'; 
+                const displayAvatar = (!isMe) ? msg.senderAvatar : 'https://picsum.photos/100';
+
                 users.set(msg.channelId, {
                     id: msg.channelId,
-                    name: msg.senderName === 'Mateus Hugo (Admin)' ? 'Usuário' : msg.senderName, 
-                    avatar: msg.senderAvatar,
+                    name: displayName,
+                    avatar: displayAvatar,
                     lastMessage: msg.text
                 });
             } else {
@@ -49,7 +58,6 @@ const Chat: React.FC = () => {
             }
         }
      });
-     
      return Array.from(users.values());
   }, [privateMessages, user]);
 
@@ -61,32 +69,42 @@ const Chat: React.FC = () => {
         sendCommunityMessage(inputText);
     } else {
         // Sending Private Message
-        // If I am User: target is ME (because channel ID for support is my ID)
-        // If I am Admin: target is activeChannel (which is the User ID I am viewing)
-        const targetId = isAdmin ? activeChannel : user?.id || '';
-        if(targetId) {
-            sendPrivateMessage(inputText, targetId);
+        // If I am User: my target channel is MY OWN ID (so Admin sees it under my ID)
+        // If I am Admin: my target channel is the SELECTED USER ID (activeChannel)
+        
+        const targetChannelId = isAdmin ? activeChannel : user?.id;
+        
+        if(targetChannelId) {
+            sendPrivateMessage(inputText, targetChannelId);
         }
     }
     setInputText('');
   };
 
   const handleSendImage = () => {
-      // Simulation for now, but linked to real DB function
       if (activeChannel === 'community') {
           sendCommunityMessage("Olhem essa foto!", `https://picsum.photos/400/300?random=${Date.now()}`);
       } else {
-           const targetId = isAdmin ? activeChannel : user?.id || '';
-           if(targetId) {
-                sendPrivateMessage("Enviei um anexo.", targetId, `https://picsum.photos/400/300?random=${Date.now()}`);
+           const targetChannelId = isAdmin ? activeChannel : user?.id;
+           if(targetChannelId) {
+                sendPrivateMessage("Enviei um anexo.", targetChannelId, `https://picsum.photos/400/300?random=${Date.now()}`);
            }
       }
   };
 
   // Determine which messages to show
+  // If Admin: show messages where channelId matches selected user
+  // If User: show messages where channelId matches ME (my support thread)
   const displayMessages = activeChannel === 'community' 
     ? communityMessages 
-    : privateMessages.filter(m => m.channelId === (isAdmin ? activeChannel : user?.id));
+    : privateMessages.filter(m => {
+        if (isAdmin) {
+            return m.channelId === activeChannel;
+        } else {
+            // User sees their own thread
+            return m.channelId === user?.id;
+        }
+    });
 
   return (
     <div className="h-[calc(100vh-140px)] md:h-[calc(100vh-64px)] flex rounded-xl border border-gray-800 overflow-hidden bg-dark-surface">
